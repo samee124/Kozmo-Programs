@@ -1,0 +1,56 @@
+{
+  "citrix": {
+    "acquired_by": "Cloud Software Group",
+    "acquired_by_key": "cloud software group",
+    "date": "2022-09-30",
+    "status": "COMPLETED"
+  },
+  "slack technologies": {
+    "acquired_by": "Salesforce Inc",
+    "acquired_by_key": "salesforce inc",
+    "date": "2021-07-21",
+    "status": "COMPLETED"
+  },
+  "github": {
+    "acquired_by": "Microsoft",
+    "acquired_by_key": "microsoft",
+    "date": "2018-10-26",
+    "status": "COMPLETED"
+  },
+  "linkedin": {
+    "acquired_by": "Microsoft",
+    "acquired_by_key": "microsoft",
+    "date": "2016-12-08",
+    "status": "COMPLETED"
+  },
+  "tableau": {
+    "acquired_by": "Salesforce Inc",
+    "acquired_by_key": "salesforce inc",
+    "date": "2019-08-01",
+    "status": "COMPLETED"
+  },
+  "mulesoft": {
+    "acquired_by": "Salesforce Inc",
+    "acquired_by_key": "salesforce inc",
+    "date": "2018-05-02",
+    "status": "COMPLETED"
+  },
+  "whatsapp": {
+    "acquired_by": "Meta Platforms Inc",
+    "acquired_by_key": "meta platforms inc",
+    "date": "2014-10-06",
+    "status": "COMPLETED"
+  },
+  "instagram": {
+    "acquired_by": "Meta Platforms Inc",
+    "acquired_by_key": "meta platforms inc",
+    "date": "2012-09-06",
+    "status": "COMPLETED"
+  },
+  "twitch": {
+    "acquired_by": "Amazon",
+    "acquired_by_key": "amazon",
+    "date": "2014-08-25",
+    "status": "COMPLETED"
+  }
+}

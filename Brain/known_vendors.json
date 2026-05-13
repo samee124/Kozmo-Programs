@@ -1,0 +1,20 @@
+{
+  "microsoft": {"canonical_name": "Microsoft Corporation", "confidence": 0.99, "country_code": "US", "category": "IT_SAAS_SOFTWARE"},
+  "ibm": {"canonical_name": "IBM", "confidence": 0.99, "country_code": "US", "category": "IT_INFRASTRUCTURE"},
+  "aws": {"canonical_name": "Amazon Web Services", "confidence": 0.99, "country_code": "US", "category": "MANAGED_HOSTING"},
+  "amazon web services": {"canonical_name": "Amazon Web Services", "confidence": 0.99, "country_code": "US", "category": "MANAGED_HOSTING"},
+  "google": {"canonical_name": "Google LLC", "confidence": 0.99, "country_code": "US", "category": "IT_SAAS_SOFTWARE"},
+  "salesforce": {"canonical_name": "Salesforce Inc", "confidence": 0.99, "country_code": "US", "category": "IT_SAAS_SOFTWARE"},
+  "sap": {"canonical_name": "SAP SE", "confidence": 0.99, "country_code": "DE", "category": "IT_ERP_SOFTWARE"},
+  "oracle": {"canonical_name": "Oracle Corporation", "confidence": 0.99, "country_code": "US", "category": "IT_ERP_SOFTWARE"},
+  "siemens": {"canonical_name": "Siemens AG", "confidence": 0.99, "country_code": "DE", "category": "IT_INFRASTRUCTURE"},
+  "accenture": {"canonical_name": "Accenture plc", "confidence": 0.99, "country_code": "IE", "category": "PROFESSIONAL_SERVICES"},
+  "aramark": {"canonical_name": "Aramark Corporation", "confidence": 0.99, "country_code": "US", "category": "FACILITIES_SERVICES"},
+  "zoom": {"canonical_name": "Zoom Video Communications", "confidence": 0.99, "country_code": "US", "category": "IT_SAAS_SOFTWARE"},
+  "servicenow": {"canonical_name": "ServiceNow Inc", "confidence": 0.99, "country_code": "US", "category": "IT_ITSM_SOFTWARE"},
+  "workday": {"canonical_name": "Workday Inc", "confidence": 0.99, "country_code": "US", "category": "IT_HRIS_SOFTWARE"},
+  "dell": {"canonical_name": "Dell Technologies", "confidence": 0.99, "country_code": "US", "category": "IT_HARDWARE"},
+  "cisco": {"canonical_name": "Cisco Systems", "confidence": 0.99, "country_code": "US", "category": "IT_NETWORKING"},
+  "adobe": {"canonical_name": "Adobe Inc", "confidence": 0.99, "country_code": "US", "category": "IT_SAAS_SOFTWARE"},
+  "atlassian": {"canonical_name": "Atlassian Corporation", "confidence": 0.99, "country_code": "AU", "category": "IT_SAAS_SOFTWARE"}
+}
