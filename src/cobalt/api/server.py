@@ -54,27 +54,35 @@ def _vendor_dirs(prog_path: Path) -> list[Path]:
     ]
 
 
+def _find_vendor_file(vp: Path) -> Path | None:
+    """Find the single *.md vendor file directly in vp."""
+    if not vp.is_dir():
+        return None
+    md_files = [f for f in vp.iterdir() if f.suffix == ".md" and f.is_file()]
+    return md_files[0] if md_files else None
+
+
+def _read_vendor(vp: Path) -> dict[str, Any]:
+    """Read and flatten the single vendor file. Returns {} if missing."""
+    f = _find_vendor_file(vp)
+    if f:
+        return _read_fm(f)
+    # Legacy fallback
+    return _read_fm(vp / "identity" / "entity.md")
+
+
 def _infer_stage(vp: Path) -> int:
-    entity_path = vp / "identity" / "entity.md"
-    if not entity_path.exists():
+    fm = _read_vendor(vp)
+    if not fm:
         return 1
-    fm = _read_fm(entity_path)
-    confidence: float = fm.get("identity_confidence") or 0.0
+    intake = fm.get("intake") or {}
+    confidence: float = float(intake.get("identity_confidence") or fm.get("identity_confidence") or 0.0)
+    legal = fm.get("legal") or {}
+    renewal = legal.get("renewal_date") or {}
+    has_contract = isinstance(renewal, dict) and renewal.get("value") is not None
 
-    campaigns_path = vp / "execution" / "campaigns"
-    if campaigns_path.exists():
-        try:
-            next(campaigns_path.iterdir())
-            return 4
-        except StopIteration:
-            pass
-
-    contract_path = vp / "cost_file" / "contract.md"
-    if contract_path.exists():
-        cfm = _read_fm(contract_path)
-        if cfm.get("status") == "OBSERVED":
-            return 3
-
+    if has_contract:
+        return 3
     if confidence >= 0.6:
         return 3
     if confidence > 0:
@@ -83,54 +91,56 @@ def _infer_stage(vp: Path) -> int:
 
 
 def _vendor_summary(vp: Path) -> dict[str, Any]:
-    entity = _read_fm(vp / "identity" / "entity.md")
-    spend = _read_fm(vp / "cost_file" / "spend.md")
-    contract = _read_fm(vp / "cost_file" / "contract.md")
-    coverage = _read_fm(vp / "cost_file" / "coverage.md")
+    fm = _read_vendor(vp)
+    intake = fm.get("intake") or {}
+    identity = fm.get("identity") or {}
+    financial = fm.get("financial") or {}
+    legal = fm.get("legal") or {}
+    classification = fm.get("classification") or {}
+    pcs = fm.get("pcs") or {}
 
-    ev_dir = vp / "evidence"
-    evidence_count = len(list(ev_dir.glob("ev-*.md"))) if ev_dir.exists() else 0
+    def _v(section: dict, key: str):
+        fd = section.get(key)
+        return fd.get("value") if isinstance(fd, dict) else fd
 
-    effective = (contract.get("effective_terms") or {}) if isinstance(contract.get("effective_terms"), dict) else {}
+    evidence_count = len(fm.get("commercial", {}).get("documents") or [])
 
     return {
         # identity
-        "vendor_id": entity.get("vendor_id") or vp.name,
-        "vendor_name": entity.get("vendor_name") or vp.name,
-        "input_name": entity.get("input_name") or vp.name,
-        "identity_confidence": entity.get("identity_confidence"),
-        "resolution_method": entity.get("resolution_method"),
-        "data_class": entity.get("data_class"),
-        "category": entity.get("category"),
-        "hq_country": entity.get("hq_country"),
+        "vendor_id": fm.get("vendor_id") or vp.name,
+        "vendor_name": fm.get("canonical_name") or vp.name,
+        "input_name": intake.get("input_name") or fm.get("canonical_name") or vp.name,
+        "identity_confidence": intake.get("identity_confidence"),
+        "resolution_method": intake.get("resolution_method"),
+        "data_class": intake.get("data_class"),
+        "category": _v(classification, "category"),
+        "hq_country": _v(identity, "hq_country"),
         "legal_entity": entity.get("legal_entity"),
         # spend
-        "annual_spend": spend.get("annual_spend"),
-        "spend_status": spend.get("status"),
-        "spend_confidence": spend.get("confidence"),
-        # contract — core
-        "contract_value": effective.get("contract_value"),
-        "contract_value_type": effective.get("contract_value_type"),
-        "contract_status": contract.get("status"),
-        "contract_confidence": contract.get("overall_confidence"),
-        "conflicts_detected": contract.get("conflicts_detected") or [],
-        # contract — terms
-        "counterparty_name": effective.get("counterparty_name"),
-        "payment_terms": effective.get("payment_terms"),
-        "early_termination": effective.get("early_termination"),
-        "renewal_date": effective.get("renewal_date"),
-        "auto_renewal": effective.get("auto_renewal"),
-        "price_escalation": effective.get("price_escalation"),
-        "escalation_rate_max": effective.get("escalation_rate_max"),
-        "liability_cap": effective.get("liability_cap"),
-        "baa_present": effective.get("baa_present"),
-        "sla_uptime_pct": effective.get("sla_uptime_pct"),
-        "nda_active": effective.get("nda_active"),
-        "nda_expiry": effective.get("nda_expiry"),
+        "annual_spend": _v(financial, "annual_spend"),
+        "spend_status": financial.get("spend_status"),
+        "spend_confidence": financial.get("spend_confidence"),
+        "currency": financial.get("currency"),
+        # contract — terms from legal section
+        "contract_value": _v(legal, "contract_value"),
+        "contract_value_type": _v(legal, "contract_value_type"),
+        "contract_status": "OBSERVED" if _v(legal, "renewal_date") is not None else "NOT_FOUND",
+        "counterparty_name": None,
+        "payment_terms": _v(legal, "payment_terms"),
+        "early_termination": _v(legal, "early_termination"),
+        "renewal_date": _v(legal, "renewal_date"),
+        "auto_renewal": _v(legal, "auto_renewal"),
+        "price_escalation": _v(legal, "price_escalation"),
+        "escalation_rate_max": _v(legal, "escalation_rate_max"),
+        "liability_cap": _v(legal, "liability_cap"),
+        "baa_present": _v(legal, "baa_present"),
+        "sla_uptime_pct": _v(legal, "sla_uptime_pct"),
+        "nda_active": _v(legal, "nda_active"),
+        "nda_expiry": _v(legal, "nda_expiry"),
         # coverage
-        "pcs_band": coverage.get("pcs_band"),
-        "overall_pcs": coverage.get("overall_pcs"),
-        "blocking_gaps": coverage.get("blocking_gaps") or [],
+        "pcs_band": pcs.get("band"),
+        "overall_pcs": pcs.get("score"),
+        "blocking_gaps": (fm.get("profile_completeness") or {}).get("blocking_gaps") or [],
         # meta
         "stage": _infer_stage(vp),
         "evidence_count": evidence_count,
@@ -255,23 +265,18 @@ def get_vendor(prog_id: str, vendor_id: str) -> dict:
 
     summary = _vendor_summary(vp)
 
-    # Full contract terms
-    contract_raw = _read_fm(vp / "cost_file" / "contract.md")
-    summary["contract_raw"] = contract_raw
+    # Full legal terms from vendor file
+    vendor_data = _read_vendor(vp)
+    summary["legal_raw"] = vendor_data.get("legal") or {}
+    summary["contract_raw"] = vendor_data.get("legal") or {}
 
-    # Evidence list
-    ev_dir = vp / "evidence"
-    evidence = []
-    if ev_dir.exists():
-        for ev_file in sorted(ev_dir.glob("ev-*.md")):
-            fm = _read_fm(ev_file)
-            fm["file"] = ev_file.name
-            evidence.append(fm)
-    summary["evidence"] = evidence
+    # Evidence (documents stored inline)
+    commercial = vendor_data.get("commercial") or {}
+    summary["evidence"] = commercial.get("documents") or []
 
-    # Ledger (if exists)
-    ledger_path = vp / "execution" / "ledger.md"
-    summary["has_ledger"] = ledger_path.exists()
+    # Change log acts as ledger
+    change_log = vendor_data.get("change_log") or []
+    summary["has_ledger"] = len(change_log) > 0
 
     return summary
 
@@ -311,7 +316,8 @@ def get_vendor_ledger(prog_id: str, vendor_id: str) -> list[dict]:
     vp = prog_path / vendor_id
     if not vp.exists():
         raise HTTPException(404, f"Vendor '{vendor_id}' not found in programme '{prog_id}'")
-    return _parse_ledger(vp / "execution" / "ledger.md")
+    vendor_data = _read_vendor(vp)
+    return vendor_data.get("change_log") or []
 
 
 # ── Static file serving ───────────────────────────────────────────────────────

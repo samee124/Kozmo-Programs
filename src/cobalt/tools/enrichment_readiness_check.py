@@ -38,9 +38,12 @@ _GAP_CONFIDENCE:       frozenset[str] = frozenset({"LOW", "INFERRED", "MISSING"}
 
 _TIER_SOURCES: dict[str, tuple[list[str], int]] = {
     "BASIC":       (["company_website"], 1),
-    "STANDARD":    (["web_search", "company_website", "linkedin", "news", "wikidata"], 2),
+    "STANDARD":    (["web_search", "company_website", "linkedin", "news",
+                     "wikidata", "wikipedia", "gleif", "opensanctions",
+                     "search_discovery"], 2),
     "DEEP":        (["web_search", "company_website", "linkedin",
-                     "registry", "financial", "news", "wikidata"], 3),
+                     "registry", "financial", "news", "wikidata", "wikipedia",
+                     "gleif", "opensanctions", "search_discovery"], 3),
     "PROVISIONAL": (["web_search"], 1),
 }
 
@@ -110,15 +113,123 @@ def _read_markdown_frontmatter(path: Path) -> dict[str, Any] | None:
     return result
 
 
+def _find_single_vendor_file(vp: Path) -> Path | None:
+    """Find the single *.md vendor file directly in vp (not subdirs)."""
+    if not vp.is_dir():
+        return None
+    md_files = [f for f in vp.iterdir() if f.suffix == ".md" and f.is_file()]
+    return md_files[0] if md_files else None
+
+
+def _flatten_vendor_data(data: dict) -> dict:
+    """Flatten a nested vendor file to the flat keys expected by readiness checks.
+
+    If data is already flat (old test format or legacy files), returns as-is.
+    If it has nested sections (new single-file format), flattens them.
+    """
+    if not data:
+        return {}
+    # Flat detection: new-format files store confidence inside 'intake'
+    if "confidence" in data or "identity_confidence" in data:
+        return data
+
+    intake = data.get("intake") or {}
+    identity = data.get("identity") or {}
+    classification = data.get("classification") or {}
+    operational = data.get("operational") or {}
+    financial = data.get("financial") or {}
+    digital = data.get("digital") or {}
+    pcs = data.get("pcs") or {}
+    compliance = data.get("compliance") or {}
+
+    flat: dict[str, Any] = {
+        "confidence":         intake.get("confidence"),
+        "identity_confidence": intake.get("confidence") or intake.get("identity_confidence"),
+        "status":             "CONFIRMED",
+        "canonical_name":     data.get("canonical_name"),
+        "last_enriched_at":   data.get("last_enriched_at"),
+        "overall_pcs":        float(pcs.get("score", 0)),
+        "pcs_band":           pcs.get("band"),
+        "data_class":         intake.get("data_class"),
+        "flags":              compliance.get("flags") or [],
+    }
+
+    # Identity fields
+    for fname in ("hq_country", "hq_city", "website", "description",
+                  "founding_year", "company_status"):
+        fd = identity.get(fname)
+        _unpack_field(flat, fname, fd)
+
+    # Digital
+    fd = digital.get("domain")
+    _unpack_field(flat, "domain", fd)
+
+    # Classification
+    for fname in ("category", "subcategory", "industry", "primary_use_case"):
+        fd = classification.get(fname)
+        _unpack_field(flat, fname, fd)
+
+    # Operational
+    for fname in ("vendor_type", "employee_count_range", "company_size_band", "parent_company"):
+        fd = operational.get(fname)
+        _unpack_field(flat, fname, fd)
+
+    # Financial
+    for fname in ("funding_stage", "revenue_range"):
+        fd = financial.get(fname)
+        _unpack_field(flat, fname, fd)
+
+    annual_spend_fd = financial.get("annual_spend")
+    flat["annual_spend"] = (
+        annual_spend_fd.get("value") if isinstance(annual_spend_fd, dict) else annual_spend_fd
+    )
+    flat["total_spend_tier"] = financial.get("total_spend_tier")
+
+    return {k: v for k, v in flat.items() if v is not None}
+
+
+def _unpack_field(flat: dict, fname: str, fd: Any) -> None:
+    """Unpack a {value, source, confidence} field dict into flat keys."""
+    if isinstance(fd, dict):
+        val = fd.get("value")
+        conf = fd.get("confidence")
+        flat[fname] = val
+        if conf and conf not in ("INSUF", None):
+            flat[f"{fname}_confidence"] = conf
+    else:
+        flat[fname] = fd
+
+
 def _read_entity(vendor_path: Path) -> dict[str, Any] | None:
+    # Try new single-file location (*.md directly in vendor_path)
+    single = _find_single_vendor_file(vendor_path)
+    if single is not None:
+        data = _read_markdown_frontmatter(single)
+        if data is not None:
+            return _flatten_vendor_data(data)
+    # Fall back to legacy entity.md
     return _read_markdown_frontmatter(vendor_path / "identity" / "entity.md")
 
 
 def _read_coverage(vendor_path: Path) -> dict[str, Any] | None:
+    # Try new single-file location
+    single = _find_single_vendor_file(vendor_path)
+    if single is not None:
+        data = _read_markdown_frontmatter(single)
+        if data is not None:
+            return _flatten_vendor_data(data)
+    # Fall back to legacy coverage.md
     return _read_markdown_frontmatter(vendor_path / "cost_file" / "coverage.md")
 
 
 def _read_spend(vendor_path: Path) -> dict[str, Any] | None:
+    # Try new single-file location
+    single = _find_single_vendor_file(vendor_path)
+    if single is not None:
+        data = _read_markdown_frontmatter(single)
+        if data is not None:
+            return _flatten_vendor_data(data)
+    # Fall back to legacy spend.md
     return _read_markdown_frontmatter(vendor_path / "cost_file" / "spend.md")
 
 

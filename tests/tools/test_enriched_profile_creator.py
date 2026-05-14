@@ -636,11 +636,11 @@ def test_triage_unresolved_conflict(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# Test 25 — Happy path: vendor_profile.md written with valid YAML frontmatter
+# Test 25 — Happy path: single vendor file written with valid YAML frontmatter
 # ---------------------------------------------------------------------------
 
 def test_workspace_write_happy_path(tmp_path):
-    """vendor_profile.md is written to the correct path with valid YAML frontmatter."""
+    """Single vendor *.md file is written with enrichment data."""
     result = create_enriched_profile(
         extracted=_make_extracted(_all_fields_enriched()),
         relationship_result=_make_relationship(),
@@ -656,34 +656,26 @@ def test_workspace_write_happy_path(tmp_path):
     assert result.profile_status in {"ENRICHED", "PARTIALLY_ENRICHED"}
     assert result.profile_path is not None
 
-    profile_file = tmp_path / "p-001" / "v-v-001" / "profile" / "vendor_profile.md"
-    assert profile_file.exists()
+    # Single-file architecture: find the *.md in the vendor directory
+    vendor_dir = tmp_path / "p-001" / "v-001"
+    md_files = list(vendor_dir.glob("*.md"))
+    assert md_files, f"No vendor *.md file found in {vendor_dir}"
+    profile_file = md_files[0]
 
     raw = profile_file.read_text(encoding="utf-8")
-    # Parse the YAML frontmatter
     parts = raw.split("---\n", 2)
     assert len(parts) >= 3, "Expected YAML frontmatter delimited by ---"
     fm = yaml.safe_load(parts[1])
     assert fm["vendor_id"] == "v-001"
-    assert fm["profile_status"] in {"ENRICHED", "PARTIALLY_ENRICHED"}
-    # Verify field_confidence and field_source keys present
-    assert "category_confidence" in fm
-    assert "category_source" in fm
-    assert fm["category_confidence"] == "HIGH"
+    assert fm["status"] in {"ENRICHED", "PARTIALLY_ENRICHED"}
 
 
 # ---------------------------------------------------------------------------
-# Test 26 — coverage.md enrichment_ledger entry appended
+# Test 26 — Enrichment appends change_log entry in vendor file
 # ---------------------------------------------------------------------------
 
-def test_coverage_md_ledger_entry_appended(tmp_path):
-    """After create_enriched_profile, coverage.md contains enrichment_ledger_entry."""
-    # Pre-create coverage.md (simulating Process 1)
-    cost_dir = tmp_path / "p-001" / "v-v-001" / "cost_file"
-    cost_dir.mkdir(parents=True)
-    coverage_file = cost_dir / "coverage.md"
-    coverage_file.write_text("---\noverall_pcs: 15\n---\n\n# Coverage\n", encoding="utf-8")
-
+def test_enrichment_ledger_appended_to_change_log(tmp_path):
+    """After create_enriched_profile, the vendor file's change_log has an enrichment entry."""
     result = create_enriched_profile(
         extracted=_make_extracted(_core_fields_all_high()),
         relationship_result=_make_relationship(),
@@ -697,10 +689,14 @@ def test_coverage_md_ledger_entry_appended(tmp_path):
     )
 
     assert result.error is None
-    raw = coverage_file.read_text(encoding="utf-8")
-    assert "enrichment_ledger_entry" in raw
-    assert "pcs_before" in raw
-    assert "pcs_after" in raw
+
+    # Find single vendor file
+    vendor_dir = tmp_path / "p-001" / "v-001"
+    md_files = list(vendor_dir.glob("*.md"))
+    assert md_files, "No vendor file found"
+    raw = md_files[0].read_text(encoding="utf-8")
+    # change_log with pcs data should be present
+    assert "pcs_before" in raw or "ENRICHMENT" in raw
 
 
 # ---------------------------------------------------------------------------

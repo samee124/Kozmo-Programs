@@ -1,4 +1,4 @@
-"""Tests for cobalt.workspace.builder."""
+"""Tests for cobalt.workspace.builder — single-file architecture."""
 
 from decimal import Decimal
 from pathlib import Path
@@ -13,7 +13,7 @@ from cobalt.models.schemas.investigation_plan_schema import (
     InvestigationPlan,
 )
 from cobalt.models.schemas.signal_profile_schema import ErpSignal
-from cobalt.workspace.builder import WorkspaceBuildResult, _pcs_band, build_workspace
+from cobalt.workspace.builder import WorkspaceBuildResult, _make_slug, _pcs_band, build_workspace
 
 
 # ---------------------------------------------------------------------------
@@ -25,6 +25,14 @@ def _read_frontmatter(path: Path) -> dict:
     text = path.read_text(encoding="utf-8")
     parts = text.split("---\n", 2)
     return yaml.safe_load(parts[1]) if len(parts) >= 3 else yaml.safe_load(text) or {}
+
+
+def _vendor_file(bw: WorkspaceBuildResult) -> Path:
+    """Return the single *.md vendor file from a build result."""
+    md_files = list(bw.workspace_path.glob("*.md"))
+    assert md_files, f"No *.md file found in {bw.workspace_path}"
+    return md_files[0]
+
 
 def _make_plan() -> InvestigationPlan:
     return InvestigationPlan(
@@ -94,181 +102,232 @@ def test_pcs_band_execution_ready():
 
 
 # ---------------------------------------------------------------------------
-# build_workspace — directory structure
+# _make_slug
 # ---------------------------------------------------------------------------
 
-def test_build_workspace_confirmed_creates_dirs(tmp_workspace):
-    result = make_confirmed()
-    bw = build_workspace(result, "prog-1")
+def test_make_slug_strips_corp():
+    assert _make_slug("IBM Corporation") == "ibm"
+
+
+def test_make_slug_strips_inc():
+    assert _make_slug("Salesforce, Inc.") == "salesforce"
+
+
+def test_make_slug_handles_spaces():
+    assert _make_slug("Acme Corp") == "acme"
+
+
+def test_make_slug_handles_numbers():
+    assert _make_slug("3M Company") == "3m_company"
+
+
+# ---------------------------------------------------------------------------
+# build_workspace — single file created
+# ---------------------------------------------------------------------------
+
+def test_build_workspace_confirmed_creates_single_file(tmp_workspace):
+    bw = build_workspace(make_confirmed(), "prog-1")
     assert bw.success is True
-    root = bw.workspace_path
-    assert (root / "identity").is_dir()
-    assert (root / "cost_file").is_dir()
-    assert (root / "execution").is_dir()
-    assert (root / "evidence").is_dir()
+    md_files = list(bw.workspace_path.glob("*.md"))
+    assert len(md_files) == 1
 
 
-# ---------------------------------------------------------------------------
-# entity.md
-# ---------------------------------------------------------------------------
-
-def test_entity_md_written(tmp_workspace):
-    bw = build_workspace(make_confirmed(), "prog-1")
-    entity_path = bw.workspace_path / "identity" / "entity.md"
-    assert entity_path.exists()
-
-
-def test_entity_md_input_name(tmp_workspace):
-    bw = build_workspace(make_confirmed(raw_input="IBM Corp"), "prog-1")
-    data = _read_frontmatter(bw.workspace_path / "identity" / "entity.md")
-    assert data["input_name"] == "IBM Corp"
-
-
-def test_entity_md_vendor_name(tmp_workspace):
+def test_build_workspace_file_named_by_slug(tmp_workspace):
     bw = build_workspace(make_confirmed(canonical_name="IBM Corporation"), "prog-1")
-    data = _read_frontmatter(bw.workspace_path / "identity" / "entity.md")
-    assert data["vendor_name"] == "IBM Corporation"
+    md_files = list(bw.workspace_path.glob("*.md"))
+    assert md_files[0].name == "ibm.md"
 
 
-def test_entity_md_version_is_1(tmp_workspace):
+def test_build_workspace_no_subdirectories(tmp_workspace):
     bw = build_workspace(make_confirmed(), "prog-1")
-    data = _read_frontmatter(bw.workspace_path / "identity" / "entity.md")
-    assert data["version"] == 1
+    subdirs = [p for p in bw.workspace_path.iterdir() if p.is_dir()]
+    assert subdirs == []
 
 
 # ---------------------------------------------------------------------------
-# spend.md
+# Vendor file structure
 # ---------------------------------------------------------------------------
 
-def test_spend_md_observed_with_erp(tmp_workspace):
+def test_vendor_file_has_vendor_id(tmp_workspace):
+    bw = build_workspace(make_confirmed(vendor_id="v-abc12345"), "prog-1")
+    data = _read_frontmatter(_vendor_file(bw))
+    assert data["vendor_id"] == "v-abc12345"
+
+
+def test_vendor_file_has_canonical_name(tmp_workspace):
+    bw = build_workspace(make_confirmed(canonical_name="IBM Corporation"), "prog-1")
+    data = _read_frontmatter(_vendor_file(bw))
+    assert data["canonical_name"] == "IBM Corporation"
+
+
+def test_vendor_file_has_slug(tmp_workspace):
+    bw = build_workspace(make_confirmed(canonical_name="IBM Corporation"), "prog-1")
+    data = _read_frontmatter(_vendor_file(bw))
+    assert data["slug"] == "ibm"
+
+
+def test_vendor_file_status_intake_completed(tmp_workspace):
+    bw = build_workspace(make_confirmed(), "prog-1")
+    data = _read_frontmatter(_vendor_file(bw))
+    assert data["status"] == "INTAKE_COMPLETED"
+
+
+def test_vendor_file_intake_section_immutable_fields(tmp_workspace):
+    bw = build_workspace(make_confirmed(raw_input="IBM Corp"), "prog-1")
+    data = _read_frontmatter(_vendor_file(bw))
+    intake = data["intake"]
+    assert intake["input_name"] == "IBM Corp"
+    assert intake["resolution_method"] == "BRAIN_LOOKUP"
+    assert intake["data_class"] == "CLASS_D"
+    assert intake["confidence"] == pytest.approx(0.97)
+
+
+# ---------------------------------------------------------------------------
+# Financial section
+# ---------------------------------------------------------------------------
+
+def test_financial_annual_spend_observed_with_erp(tmp_workspace):
     erp = ErpSignal(exists=True, spend=Decimal("75000"), category="IT", vendor_ids=[])
     bw = build_workspace(make_confirmed(), "prog-1", erp_signal=erp)
-    data = _read_frontmatter(bw.workspace_path / "cost_file" / "spend.md")
-    assert data["status"] == "OBSERVED"
-    assert data["confidence"] == pytest.approx(0.92)
-    assert data["annual_spend"] == "75000"
+    data = _read_frontmatter(_vendor_file(bw))
+    fin = data["financial"]
+    assert fin["spend_status"] == "OBSERVED"
+    assert fin["annual_spend"]["value"] == "75000"
 
 
-def test_spend_md_inferred_without_erp(tmp_workspace):
+def test_financial_annual_spend_inferred_without_erp(tmp_workspace):
     bw = build_workspace(make_confirmed(), "prog-1")
-    data = _read_frontmatter(bw.workspace_path / "cost_file" / "spend.md")
-    assert data["status"] == "INFERRED"
-    assert data["confidence"] == pytest.approx(0.25)
-    assert data["annual_spend"] is None
+    data = _read_frontmatter(_vendor_file(bw))
+    fin = data["financial"]
+    assert fin["spend_status"] == "INFERRED"
+    assert fin["annual_spend"]["confidence"] == "INSUF"
 
 
-def test_spend_md_inferred_when_erp_has_no_spend(tmp_workspace):
-    erp = ErpSignal(exists=True, spend=None, category=None, vendor_ids=[])
+def test_financial_currency_none_when_erp_has_no_currency(tmp_workspace):
+    erp = ErpSignal(exists=True, spend=Decimal("50000"), category="IT", vendor_ids=[])
     bw = build_workspace(make_confirmed(), "prog-1", erp_signal=erp)
-    data = _read_frontmatter(bw.workspace_path / "cost_file" / "spend.md")
-    assert data["status"] == "INFERRED"
+    data = _read_frontmatter(_vendor_file(bw))
+    # currency should be None (ErpSignal has no currency attr)
+    assert data["financial"]["currency"] is None
 
 
 # ---------------------------------------------------------------------------
-# contract.md
+# Legal section
 # ---------------------------------------------------------------------------
 
-def test_contract_md_observed_with_terms(tmp_workspace):
+def test_legal_section_observed_with_terms(tmp_workspace):
     terms = {"renewal_date": "2026-01-01", "contract_value": "100000", "confidence": 0.88}
     bw = build_workspace(make_confirmed(), "prog-1", extracted_terms=terms)
-    data = _read_frontmatter(bw.workspace_path / "cost_file" / "contract.md")
-    assert data["status"] == "OBSERVED"
-    assert data["overall_confidence"] == pytest.approx(0.88)
-    assert data["renewal_date"] == "2026-01-01"
+    data = _read_frontmatter(_vendor_file(bw))
+    legal = data["legal"]
+    assert legal["renewal_date"]["value"] == "2026-01-01"
+    assert legal["contract_value"]["value"] == "100000"
 
 
-def test_contract_md_not_found_without_terms(tmp_workspace):
+def test_legal_section_insuf_without_terms(tmp_workspace):
     bw = build_workspace(make_confirmed(), "prog-1")
-    data = _read_frontmatter(bw.workspace_path / "cost_file" / "contract.md")
-    assert data["status"] == "NOT_FOUND"
-    assert data["overall_confidence"] == pytest.approx(0.10)
+    data = _read_frontmatter(_vendor_file(bw))
+    legal = data["legal"]
+    assert legal["renewal_date"]["confidence"] == "INSUF"
+    assert legal["renewal_date"]["value"] is None
 
 
 # ---------------------------------------------------------------------------
-# coverage.md
+# PCS section
 # ---------------------------------------------------------------------------
 
-def test_coverage_md_pcs_zero_no_signals(tmp_workspace):
+def test_pcs_zero_no_signals(tmp_workspace):
     bw = build_workspace(make_confirmed(), "prog-1")
-    data = _read_frontmatter(bw.workspace_path / "cost_file" / "coverage.md")
-    assert data["overall_pcs"] == 0
-    assert data["pcs_band"] == "INSUFFICIENT"
+    data = _read_frontmatter(_vendor_file(bw))
+    assert data["pcs"]["score"] == 0
+    assert data["pcs"]["band"] == "INSUFFICIENT"
 
 
-def test_coverage_md_pcs_with_erp_and_terms(tmp_workspace):
+def test_pcs_with_erp_and_terms(tmp_workspace):
     erp = ErpSignal(exists=True, spend=Decimal("50000"), category=None, vendor_ids=[])
     terms = {"renewal_date": "2026-01-01", "contract_value": "50000", "confidence": 0.80}
     bw = build_workspace(make_confirmed(), "prog-1", extracted_terms=terms, erp_signal=erp)
-    data = _read_frontmatter(bw.workspace_path / "cost_file" / "coverage.md")
+    data = _read_frontmatter(_vendor_file(bw))
     # +12 (spend) +15 (renewal_date) +8 (contract_value) = 35
-    assert data["overall_pcs"] == 35
-    assert data["pcs_band"] == "EXPLORATORY"
+    assert data["pcs"]["score"] == 35
+    assert data["pcs"]["band"] == "EXPLORATORY"
 
 
-def test_coverage_md_has_blocking_gaps(tmp_workspace):
+# ---------------------------------------------------------------------------
+# Classification section
+# ---------------------------------------------------------------------------
+
+def test_classification_category_from_erp(tmp_workspace):
+    bw = build_workspace(make_confirmed(erp_category="IT_SOFTWARE"), "prog-1")
+    data = _read_frontmatter(_vendor_file(bw))
+    assert data["classification"]["category"]["value"] == "IT_SOFTWARE"
+    assert data["classification"]["category"]["source"] == "ERP"
+
+
+def test_classification_category_insuf_without_erp_category(tmp_workspace):
+    bw = build_workspace(make_confirmed(erp_category=None), "prog-1")
+    data = _read_frontmatter(_vendor_file(bw))
+    assert data["classification"]["category"]["confidence"] == "INSUF"
+
+
+# ---------------------------------------------------------------------------
+# Change log
+# ---------------------------------------------------------------------------
+
+def test_change_log_has_intake_entry(tmp_workspace):
     bw = build_workspace(make_confirmed(), "prog-1")
-    data = _read_frontmatter(bw.workspace_path / "cost_file" / "coverage.md")
-    assert data["blocking_gaps"] == []
+    data = _read_frontmatter(_vendor_file(bw))
+    assert len(data["change_log"]) == 1
+    assert data["change_log"][0]["event"] == "INTAKE_COMPLETED"
+
+
+def test_change_log_pcs_score(tmp_workspace):
+    erp = ErpSignal(exists=True, spend=Decimal("50000"), category=None, vendor_ids=[])
+    bw = build_workspace(make_confirmed(), "prog-1", erp_signal=erp)
+    data = _read_frontmatter(_vendor_file(bw))
+    assert data["change_log"][0]["pcs_score"] == 12
 
 
 # ---------------------------------------------------------------------------
-# evidence files
+# Contract documents
 # ---------------------------------------------------------------------------
 
-def test_evidence_written_per_doc_id(tmp_workspace):
+def test_documents_written_per_doc_id(tmp_workspace):
     terms = {"doc_type": "MSA", "confidence": 0.85}
     result = make_confirmed(linked_doc_ids=["abc123", "def456"])
     bw = build_workspace(result, "prog-1", extracted_terms=terms)
-    ev1 = bw.workspace_path / "evidence" / "ev-contract-abc123.md"
-    ev2 = bw.workspace_path / "evidence" / "ev-contract-def456.md"
-    assert ev1.exists()
-    assert ev2.exists()
+    data = _read_frontmatter(_vendor_file(bw))
+    doc_ids = [d["doc_id"] for d in data["commercial"]["documents"]]
+    assert "abc123" in doc_ids
+    assert "def456" in doc_ids
 
 
-def test_evidence_not_written_without_terms(tmp_workspace):
+def test_documents_not_written_without_terms(tmp_workspace):
     result = make_confirmed(linked_doc_ids=["abc123"])
     bw = build_workspace(result, "prog-1")  # no extracted_terms
-    ev = bw.workspace_path / "evidence" / "ev-contract-abc123.md"
-    assert not ev.exists()
+    data = _read_frontmatter(_vendor_file(bw))
+    assert data["commercial"]["documents"] == []
 
 
-def test_evidence_content_has_doc_id(tmp_workspace):
+def test_document_content_has_doc_type(tmp_workspace):
     terms = {"doc_type": "SOW", "confidence": 0.75}
     result = make_confirmed(linked_doc_ids=["xyz789"])
     bw = build_workspace(result, "prog-1", extracted_terms=terms)
-    data = _read_frontmatter(bw.workspace_path / "evidence" / "ev-contract-xyz789.md")
-    assert data["data"]["doc_id"] == "xyz789"
-    assert data["type"] == "CONTRACT_DOCUMENT"
-
-
-# ---------------------------------------------------------------------------
-# ledger.md
-# ---------------------------------------------------------------------------
-
-def test_ledger_md_created(tmp_workspace):
-    bw = build_workspace(make_confirmed(), "prog-1")
-    ledger = bw.workspace_path / "execution" / "ledger.md"
-    assert ledger.exists()
-
-
-def test_ledger_md_contains_intake_completed(tmp_workspace):
-    bw = build_workspace(make_confirmed(), "prog-1")
-    content = (bw.workspace_path / "execution" / "ledger.md").read_text(encoding="utf-8")
-    assert "INTAKE_COMPLETED" in content
+    data = _read_frontmatter(_vendor_file(bw))
+    doc = data["commercial"]["documents"][0]
+    assert doc["doc_id"] == "xyz789"
+    assert doc["doc_type"] == "SOW"
+    assert doc["type"] == "CONTRACT_DOCUMENT"
 
 
 # ---------------------------------------------------------------------------
 # files_written tracking
 # ---------------------------------------------------------------------------
 
-def test_files_written_includes_entity(tmp_workspace):
+def test_files_written_contains_single_entry(tmp_workspace):
     bw = build_workspace(make_confirmed(), "prog-1")
-    assert any("entity.md" in f for f in bw.files_written)
-
-
-def test_files_written_includes_ledger(tmp_workspace):
-    bw = build_workspace(make_confirmed(), "prog-1")
-    assert any("ledger.md" in f for f in bw.files_written)
+    assert len(bw.files_written) == 1
+    assert bw.files_written[0].endswith(".md")
 
 
 # ---------------------------------------------------------------------------

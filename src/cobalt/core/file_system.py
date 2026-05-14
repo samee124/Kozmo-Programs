@@ -26,24 +26,25 @@ def programme_path(programme_id: str) -> Path:
 
 
 def init_vendor_workspace(programme_id: str, vendor_id: str) -> None:
-    """Create all required subdirectories under the vendor workspace root."""
+    """Create vendor workspace root directory (single-file architecture)."""
     root = vendor_path(programme_id, vendor_id)
-    subdirs = [
-        "identity",
-        "cost_file",
-        "evidence",
-        "inference",
-        "evaluation",
-        "execution",
-        "execution/campaigns",
-        "intake",
-        "communication",
-        "communication/checkins",
-        "connectors",
-        "connectors/logs",
-    ]
-    for subdir in subdirs:
-        (root / subdir).mkdir(parents=True, exist_ok=True)
+    root.mkdir(parents=True, exist_ok=True)
+
+
+def _find_vendor_file(
+    programme_id: str,
+    vendor_id: str,
+    workspace_root: "Path | None" = None,
+) -> "Path | None":
+    """Find the single *.md vendor file in the vendor workspace directory.
+
+    Returns the first .md file found directly in the vendor root, or None.
+    """
+    root = (Path(workspace_root) if workspace_root else WORKSPACE_ROOT) / programme_id / vendor_id
+    if not root.is_dir():
+        return None
+    md_files = [f for f in root.iterdir() if f.suffix == ".md" and f.is_file()]
+    return md_files[0] if md_files else None
 
 
 def init_programme_workspace(programme_id: str) -> None:

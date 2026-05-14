@@ -53,25 +53,54 @@ def _resolve_workspace_root(workspace_root: Path | None) -> Path:
 
 
 def _read_entity_md(programme_id: str, vendor_id: str, workspace: Path) -> dict:
-    """Read entity.md from vendor workspace. Returns {} if missing or unreadable."""
-    path = workspace / programme_id / vendor_id / "identity" / "entity.md"
+    """Read vendor data from the single vendor file. Returns {} if missing or unreadable."""
+    from cobalt.core.file_system import _find_vendor_file
     try:
-        data = read_md(path)
-        return data or {}
+        file_path = _find_vendor_file(programme_id, vendor_id, workspace)
+        if file_path is None:
+            return {}
+        data = read_md(file_path) or {}
+        # Flatten nested new-format to the flat keys expected by SearchContext
+        identity = data.get("identity") or {}
+        digital = data.get("digital") or {}
+        intake = data.get("intake") or {}
+
+        def _val(section: dict, key: str):
+            fd = section.get(key)
+            return fd.get("value") if isinstance(fd, dict) else fd
+
+        return {
+            "vendor_name":        data.get("canonical_name"),
+            "canonical_name":     data.get("canonical_name"),
+            "hq_country":         _val(identity, "hq_country"),
+            "website":            _val(identity, "website"),
+            "domain":             _val(digital, "domain"),
+            "confidence":         intake.get("confidence"),
+            "identity_confidence": intake.get("confidence"),
+            "data_class":         intake.get("data_class"),
+        }
     except Exception as exc:
-        logger.warning("Could not read entity.md for %s/%s: %s", programme_id, vendor_id, exc)
+        logger.warning("Could not read vendor file for %s/%s: %s", programme_id, vendor_id, exc)
         return {}
 
 
 def _read_pcs_from_coverage(programme_id: str, vendor_id: str, workspace: Path) -> float:
-    """Read overall_pcs from coverage.md. Returns 0.0 if missing."""
-    path = workspace / programme_id / vendor_id / "cost_file" / "coverage.md"
+    """Read PCS score from the single vendor file. Returns 0.0 if missing."""
+    from cobalt.core.file_system import _find_vendor_file
     try:
-        data = read_md(path)
-        if data:
-            return float(data.get("overall_pcs", 0.0))
+        file_path = _find_vendor_file(programme_id, vendor_id, workspace)
+        if file_path is None:
+            return 0.0
+        data = read_md(file_path) or {}
+        pcs = data.get("pcs") or {}
+        score = pcs.get("score")
+        if score is not None:
+            # pcs.score is stored on 0-100 scale; _compute_pcs works on 0-1 scale
+            return float(score) / 100.0
+        # Legacy flat format fallback
+        return float(data.get("overall_pcs", 0.0))
     except Exception as exc:
-        logger.warning("Could not read coverage.md for %s/%s: %s", programme_id, vendor_id, exc)
+        logger.warning("Could not read PCS for %s/%s: %s", programme_id, vendor_id, exc)
     return 0.0
 
 

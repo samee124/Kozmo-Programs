@@ -105,10 +105,19 @@ _OUTPUT_SCHEMA = """{
     "description":          {"value": "<str|null>", "confidence": "...", "source": "..."},
     "hq_city":              {"value": "<str|null>", "confidence": "...", "source": "..."},
     "hq_country":           {"value": "<ISO-3166-1-alpha-2|null>", "confidence": "...", "source": "..."},
+    "hq_address":           {"value": "<full street address|null>", "confidence": "...", "source": "..."},
+    "registered_address":   {"value": "<registered office address|null>", "confidence": "...", "source": "..."},
     "founding_year":        {"value": "<int|null>", "confidence": "...", "source": "..."},
+    "incorporation_date":   {"value": "<YYYY-MM-DD|null>", "confidence": "...", "source": "..."},
     "company_status":       {"value": "<PUBLIC|PRIVATE|SUBSIDIARY|NON_PROFIT|UNKNOWN|null>", "confidence": "...", "source": "..."},
+    "legal_name":           {"value": "<official registered legal name|null>", "confidence": "...", "source": "..."},
+    "lei":                  {"value": "<20-char LEI code|null>", "confidence": "...", "source": "..."},
+    "registration_number":  {"value": "<company reg number|null>", "confidence": "...", "source": "..."},
+    "jurisdiction":         {"value": "<e.g. US-DE, GB, AU|null>", "confidence": "...", "source": "..."},
+    "linkedin_url":         {"value": "<LinkedIn company page URL|null>", "confidence": "...", "source": "..."},
     "employee_count_range": {"value": "<1-10|11-50|51-200|201-500|501-1000|1001-5000|5001-10000|10000+|null>", "confidence": "...", "source": "..."},
     "revenue_range":        {"value": "<<$1M|$1M-$10M|$10M-$50M|$50M-$100M|$100M-$500M|$500M-$1B|$1B-$10B|$10B+|null>", "confidence": "...", "source": "..."},
+    "revenue":              {"value": "<reported revenue string e.g. '$41.5B'|null>", "confidence": "...", "source": "..."},
     "company_size_band":    {"value": "<STARTUP|SMB|MID_MARKET|ENTERPRISE|null>", "confidence": "...", "source": "..."},
     "funding_stage":        {"value": "<BOOTSTRAPPED|SEED|SERIES_A|SERIES_B|SERIES_C_PLUS|PE_BACKED|PUBLIC|UNKNOWN|null>", "confidence": "...", "source": "..."},
     "ticker":               {"value": "<str|null>", "confidence": "...", "source": "..."},
@@ -125,6 +134,7 @@ _OUTPUT_SCHEMA = """{
   "certifications":         [{"name": "<str>", "type": "<SECURITY|QUALITY|DIVERSITY|PARTNER|REGULATORY>", "verification": "<SELF_REPORTED|THIRD_PARTY_VERIFIED>", "source": "<str>"}],
   "customer_segments":      [{"value": "<str>", "confidence_tag": "<SELF_REPORTED|THIRD_PARTY_CONFIRMED|CLAIMED>", "source": "<str>"}],
   "reputation_signals":     [{"signal_type": "<LEGAL|FINANCIAL_RISK|DATA_SECURITY|ETHICS|ESG|POSITIVE>", "description": "<str>", "source_url": "<str>", "publication_date": "<str|null>"}],
+  "key_people":             [{"name": "<str>", "role": "<CEO|CFO|CTO|COO|FOUNDER|CHAIR|OTHER>", "source": "<str>"}],
   "conflicts":              [{"field": "<str>", "source_a": {}, "source_b": {}}]
 }
 Return ONLY the JSON. No other text."""
@@ -135,6 +145,7 @@ _LIST_KEY_MAP = [
     ("certifications",        "_certifications"),
     ("customer_segments",     "_customer_segments"),
     ("reputation_signals",    "_reputation_signals"),
+    ("key_people",            "_key_people"),
 ]
 
 _OFFICIAL_SOURCES = frozenset({"company_website", "registry", "financial",

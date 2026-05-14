@@ -14,11 +14,15 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+import urllib.parse
+import urllib.request
+
 from cobalt.core.companies_house import (
     companies_house_get_company,
     companies_house_search,
 )
 from cobalt.core.exceptions import SecEdgarError
+from cobalt.core.gleif import gleif_search_by_name
 from cobalt.core.search import brave_search, classify_url_quality, fetch_url
 from cobalt.core.sec_edgar import sec_get_company_submissions, sec_search_by_name
 from cobalt.core.opencorporates import opencorporates_search
@@ -684,14 +688,255 @@ def _collect_wikidata(ctx: _SearchContext) -> tuple[list[SourceEvidenceItem], li
     return [item], flags
 
 
+def _gleif_normalize(s: str) -> str:
+    """Strip punctuation/suffixes for fuzzy GLEIF name matching."""
+    import re as _re
+    return _re.sub(r"[^a-z0-9 ]", "", s.lower()).strip()
+
+
+def _collect_gleif(ctx: _SearchContext) -> tuple[list[SourceEvidenceItem], list[str]]:
+    """Look up the vendor in GLEIF LEI registry for authoritative entity data.
+
+    Provides LEI, legal name, jurisdiction, and parent/subsidiary links for
+    ~2.5M regulated entities globally. No API key required.
+    """
+    try:
+        matches = gleif_search_by_name(ctx.canonical_name, limit=5)
+    except Exception:
+        logger.exception("GLEIF search error for %r", ctx.canonical_name)
+        return [], ["GLEIF_FETCH_ERROR"]
+
+    if not matches:
+        return [], ["NO_GLEIF_RECORD"]
+
+    target_norm = _gleif_normalize(ctx.canonical_name)
+    best = None
+    for m in matches:
+        if _gleif_normalize(m.get("legal_name") or "") == target_norm:
+            best = m
+            break
+    if best is None:
+        # Fuzzy: accept if normalized target is a substring of the legal name or vice versa
+        candidate = matches[0]
+        cand_norm = _gleif_normalize(candidate.get("legal_name") or "")
+        if target_norm in cand_norm or cand_norm in target_norm:
+            best = candidate
+        else:
+            return [], ["NO_GLEIF_RECORD"]
+
+    lei = best.get("lei", "")
+    item = SourceEvidenceItem(
+        content=json.dumps(best, sort_keys=True),
+        source_type="GLEIF",
+        source_url=f"https://www.gleif.org/lei/{lei}" if lei else "",
+        retrieved_at=_now_iso(),
+        validation_status="CONFIRMED" if _gleif_normalize(best.get("legal_name") or "") == target_norm else "LIKELY",
+        quality_signal="OFFICIAL",
+        signal_type=None,
+    )
+    return [item], []
+
+
+def _collect_opensanctions(ctx: _SearchContext) -> tuple[list[SourceEvidenceItem], list[str]]:
+    """Screen the vendor against OpenSanctions watchlist/sanctions database.
+
+    Uses the free public search endpoint. Optional OPENSANCTIONS_API_KEY for
+    higher rate limits. Returns a SANCTIONS source item if results found.
+    """
+    api_key = os.environ.get("OPENSANCTIONS_API_KEY", "")
+    url = "https://api.opensanctions.org/search/default"
+    params = urllib.parse.urlencode({"q": ctx.canonical_name, "schema": "Company", "limit": 5})
+    full_url = f"{url}?{params}"
+
+    headers: dict[str, str] = {"Accept": "application/json"}
+    if api_key:
+        headers["Authorization"] = f"ApiKey {api_key}"
+
+    req = urllib.request.Request(full_url, headers=headers)
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+    except Exception:
+        logger.exception("OpenSanctions search error for %r", ctx.canonical_name)
+        return [], ["OPENSANCTIONS_FETCH_ERROR"]
+
+    results = data.get("results") or []
+    if not results:
+        return [], ["NO_SANCTIONS_RECORD"]
+
+    item = SourceEvidenceItem(
+        content=json.dumps(data, sort_keys=True),
+        source_type="SANCTIONS",
+        source_url=full_url,
+        retrieved_at=_now_iso(),
+        validation_status="UNCERTAIN",
+        quality_signal="OFFICIAL",
+        signal_type="SANCTIONS_HIT" if results else None,
+    )
+    return [item], []
+
+
+def _collect_abn_lookup(ctx: _SearchContext) -> tuple[list[SourceEvidenceItem], list[str]]:
+    """Look up an Australian vendor in the ABN (Australian Business Number) register.
+
+    Only called for AU vendors. Requires ABN_LOOKUP_GUID env var.
+    Free public API from the Australian Business Register.
+    """
+    hq = (ctx.hq_country or "").upper()
+    if hq not in {"AU", "AUS", "AUSTRALIA"}:
+        return [], []
+
+    guid = os.environ.get("ABN_LOOKUP_GUID", "")
+    if not guid:
+        return [], ["ABN_LOOKUP_NO_GUID"]
+
+    name_enc = urllib.parse.quote(ctx.canonical_name)
+    url = (
+        f"https://api.abr.business.gov.au/ABRxmlSearch/AbrXmlSearch.asmx/SearchByNameSimpleProtocol"
+        f"?name={name_enc}&postcode=&legalName=Y&tradingName=Y&NSW=Y&SA=Y&ACT=Y&VIC=Y&WA=Y"
+        f"&NT=Y&QLD=Y&TAS=Y&authenticationGuid={guid}"
+    )
+    try:
+        with urllib.request.urlopen(url, timeout=15) as resp:
+            raw = resp.read().decode("utf-8")
+    except Exception:
+        logger.exception("ABN Lookup error for %r", ctx.canonical_name)
+        return [], ["ABN_LOOKUP_FETCH_ERROR"]
+
+    item = SourceEvidenceItem(
+        content=raw[:4000],
+        source_type="REGISTRY",
+        source_url=url,
+        retrieved_at=_now_iso(),
+        validation_status=_validate_against_entity(raw, url, ctx),
+        quality_signal="OFFICIAL",
+        signal_type=None,
+    )
+    return [item], []
+
+
+def _collect_sirene(ctx: _SearchContext) -> tuple[list[SourceEvidenceItem], list[str]]:
+    """Look up a French vendor in the SIRENE official business register.
+
+    Only called for FR vendors. Requires SIRENE_API_TOKEN env var (INSEE token).
+    """
+    hq = (ctx.hq_country or "").upper()
+    if hq not in {"FR", "FRA", "FRANCE"}:
+        return [], []
+
+    token = os.environ.get("SIRENE_API_TOKEN", "")
+    if not token:
+        return [], ["SIRENE_NO_TOKEN"]
+
+    name_enc = urllib.parse.quote(ctx.canonical_name)
+    url = f"https://api.insee.fr/api-sirene/3.11/siren?q=denominationUniteLegale:{name_enc}&nombre=5"
+    req = urllib.request.Request(url, headers={
+        "Authorization": f"Bearer {token}",
+        "Accept":        "application/json",
+    })
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+    except Exception:
+        logger.exception("SIRENE search error for %r", ctx.canonical_name)
+        return [], ["SIRENE_FETCH_ERROR"]
+
+    units = data.get("unitesLegales") or []
+    if not units:
+        return [], ["NO_SIRENE_RECORD"]
+
+    item = SourceEvidenceItem(
+        content=json.dumps(units[0], sort_keys=True),
+        source_type="REGISTRY",
+        source_url=url,
+        retrieved_at=_now_iso(),
+        validation_status=_validate_against_entity(json.dumps(units[0]), url, ctx),
+        quality_signal="OFFICIAL",
+        signal_type=None,
+    )
+    return [item], []
+
+
+def _collect_wikipedia(ctx: _SearchContext) -> tuple[list[SourceEvidenceItem], list[str]]:
+    """Fetch a Wikipedia page summary for the vendor.
+
+    Extends Wikidata with natural-language description from Wikipedia REST API.
+    Returns MEDIUM-confidence DIRECTORY quality items.
+    """
+    title_enc = urllib.parse.quote(ctx.canonical_name.replace(" ", "_"))
+    url = f"https://en.wikipedia.org/api/rest_v1/page/summary/{title_enc}"
+    req = urllib.request.Request(url, headers={"User-Agent": "Cobalt VendorIntelligence/1.0"})
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+    except Exception:
+        logger.exception("Wikipedia fetch error for %r", ctx.canonical_name)
+        return [], ["WIKIPEDIA_FETCH_ERROR"]
+
+    if data.get("type") == "https://mediawiki.org/wiki/HyperSwitch/errors/not_found":
+        return [], ["NO_WIKIPEDIA_RECORD"]
+
+    extract = data.get("extract") or ""
+    if not extract:
+        return [], ["NO_WIKIPEDIA_RECORD"]
+
+    item = SourceEvidenceItem(
+        content=extract[:4000],
+        source_type="WIKIDATA",
+        source_url=data.get("content_urls", {}).get("desktop", {}).get("page", url),
+        retrieved_at=_now_iso(),
+        validation_status=_validate_against_entity(extract, url, ctx),
+        quality_signal="DIRECTORY",
+        signal_type=_detect_lifecycle_signal(extract),
+    )
+    return [item], []
+
+
+def _collect_search_discovery(ctx: _SearchContext) -> tuple[list[SourceEvidenceItem], list[str]]:
+    """DuckDuckGo Instant Answer API for low-confidence discovery enrichment.
+
+    Free, no API key. Returns abstract text if available. LOW confidence.
+    """
+    query_enc = urllib.parse.quote(ctx.canonical_name)
+    url = f"https://api.duckduckgo.com/?q={query_enc}&format=json&no_redirect=1&no_html=1"
+    req = urllib.request.Request(url, headers={"User-Agent": "Cobalt VendorIntelligence/1.0"})
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+    except Exception:
+        logger.exception("DuckDuckGo search error for %r", ctx.canonical_name)
+        return [], ["SEARCH_DISCOVERY_FETCH_ERROR"]
+
+    abstract = data.get("Abstract") or data.get("AbstractText") or ""
+    if not abstract:
+        return [], ["NO_SEARCH_DISCOVERY_RESULT"]
+
+    item = SourceEvidenceItem(
+        content=abstract[:2000],
+        source_type="WEB_SEARCH",
+        source_url=data.get("AbstractURL") or url,
+        retrieved_at=_now_iso(),
+        validation_status=_validate_against_entity(abstract, url, ctx),
+        quality_signal="DIRECTORY",
+        signal_type=_detect_lifecycle_signal(abstract),
+    )
+    return [item], []
+
+
 _COLLECTORS: dict[str, Any] = {
-    "web_search":      _collect_web_search,
-    "company_website": _collect_company_website,
-    "news":            _collect_news,
-    "linkedin":        _collect_linkedin,
-    "registry":        _collect_registry,
-    "financial":       _collect_financial,
-    "wikidata":        _collect_wikidata,
+    "web_search":        _collect_web_search,
+    "company_website":   _collect_company_website,
+    "news":              _collect_news,
+    "linkedin":          _collect_linkedin,
+    "registry":          _collect_registry,
+    "financial":         _collect_financial,
+    "wikidata":          _collect_wikidata,
+    "gleif":             _collect_gleif,
+    "opensanctions":     _collect_opensanctions,
+    "abn_lookup":        _collect_abn_lookup,
+    "sirene":            _collect_sirene,
+    "wikipedia":         _collect_wikipedia,
+    "search_discovery":  _collect_search_discovery,
 }
 
 

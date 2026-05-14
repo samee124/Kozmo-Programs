@@ -110,7 +110,7 @@ def _make_profile_result(
         vendor_id=vendor_id,
         profile_status=profile_status,
         overall_confidence="HIGH",
-        profile_path=f"/fake/workspace/p1/{vendor_id}/profile/vendor_profile.md",
+        profile_path=f"/fake/workspace/p1/{vendor_id}/{vendor_id}.md",
         pcs_before=pcs_before,
         pcs_after=pcs_after,
         flags=flags or ["SINGLE_SOURCE_ONLY"],

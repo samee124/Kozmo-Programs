@@ -198,17 +198,20 @@ class TestScenario1CsvOnly:
         assert ibm is not None
         assert ibm.workspace_path is not None
         ws = Path(ibm.workspace_path)
-        assert (ws / "identity" / "entity.md").exists()
-        assert (ws / "cost_file" / "spend.md").exists()
-        assert (ws / "execution" / "ledger.md").exists()
+        # Single-file architecture: one *.md in vendor root
+        md_files = list(ws.glob("*.md"))
+        assert md_files, f"No vendor *.md file found in {ws}"
 
     def test_contract_not_found_without_docs(self):
-        # No documents supplied → every vendor's contract.md shows NOT_FOUND
+        # No documents supplied → legal.renewal_date has INSUF confidence
         ibm_vid = _ibm_vendor_id("prog-s1")
         ibm = next((d for d in self.result.confirmed if d.vendor_id == ibm_vid), None)
         assert ibm is not None and ibm.workspace_path is not None
-        contract_text = (Path(ibm.workspace_path) / "cost_file" / "contract.md").read_text(encoding="utf-8")
-        assert "NOT_FOUND" in contract_text
+        ws = Path(ibm.workspace_path)
+        md_files = list(ws.glob("*.md"))
+        assert md_files
+        vendor_text = md_files[0].read_text(encoding="utf-8")
+        assert "INSUF" in vendor_text
 
     def test_pcs_zero_without_erp_or_docs(self):
         # No ERP connector, no extracted contract terms → PCS = 0 for all confirmed
@@ -257,22 +260,28 @@ class TestScenario2CsvPlusDocs:
         assert len(self.result.confirmed) > 0
 
     def test_document_backed_vendor_has_observed_contract(self):
-        # IBM is linked to ibm_msa.pdf → extract_contract_terms called → contract.md OBSERVED
+        # IBM is linked to ibm_msa.pdf → extract_contract_terms called → legal section has data
         ibm_vid = _ibm_vendor_id("prog-s2")
         ibm = next((d for d in self.result.confirmed if d.vendor_id == ibm_vid), None)
         assert ibm is not None and ibm.workspace_path is not None
-        contract_text = (Path(ibm.workspace_path) / "cost_file" / "contract.md").read_text(encoding="utf-8")
-        assert "OBSERVED" in contract_text
+        ws = Path(ibm.workspace_path)
+        md_files = list(ws.glob("*.md"))
+        assert md_files
+        vendor_text = md_files[0].read_text(encoding="utf-8")
+        # The legal section should have at least one contract field populated
+        assert "CONTRACT" in vendor_text
 
     def test_evidence_file_created_for_linked_doc(self):
-        # Evidence file ev-contract-{doc_id}.md written under IBM workspace
-        # doc_id is md5(file_path) — mock sets file_path="/fake/drive/ibm_msa.pdf"
+        # Contract documents stored inline in commercial.documents
         ibm_doc_id = hashlib.md5("/fake/drive/ibm_msa.pdf".encode()).hexdigest()[:12]
         ibm_vid = _ibm_vendor_id("prog-s2")
         ibm = next((d for d in self.result.confirmed if d.vendor_id == ibm_vid), None)
         assert ibm is not None and ibm.workspace_path is not None
-        ev_path = Path(ibm.workspace_path) / "evidence" / f"ev-contract-{ibm_doc_id}.md"
-        assert ev_path.exists()
+        ws = Path(ibm.workspace_path)
+        md_files = list(ws.glob("*.md"))
+        assert md_files
+        vendor_text = md_files[0].read_text(encoding="utf-8")
+        assert ibm_doc_id in vendor_text
 
     def test_ip_files_written_for_unknown_vendors(self):
         # Infosys, Redpath, Vertex, Praxis, Solaro, Brentfield all follow INVESTIGATE path

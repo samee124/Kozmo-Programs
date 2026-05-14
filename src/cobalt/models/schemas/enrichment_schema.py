@@ -15,6 +15,7 @@ from cobalt.core.exceptions import EnrichmentSchemaError
 DEPTH_TIERS = frozenset({"BASIC", "STANDARD", "DEEP", "PROVISIONAL"})
 SOURCE_TYPES = frozenset({
     "WEB_SEARCH", "COMPANY_WEBSITE", "LINKEDIN", "REGISTRY", "FINANCIAL", "NEWS", "WIKIDATA",
+    "GLEIF", "SANCTIONS", "WIKIPEDIA",
 })
 VALIDATION_STATUSES = frozenset({"CONFIRMED", "LIKELY", "UNCERTAIN", "REJECTED"})
 QUALITY_SIGNALS = frozenset({"OFFICIAL", "DIRECTORY", "NEWS", "SOCIAL"})
@@ -318,6 +319,7 @@ class VendorProfile:
     certifications:        list[dict]          = field(default_factory=list)
     customer_segments:     list[dict]          = field(default_factory=list)
     reputation_signals:    list[dict]          = field(default_factory=list)
+    key_people:            list[dict]          = field(default_factory=list)
     lifecycle_signals:     list[LifecycleSignal] = field(default_factory=list)
     gaps:                  dict               = field(
         default_factory=lambda: {"blocking": [], "enrichment": []}

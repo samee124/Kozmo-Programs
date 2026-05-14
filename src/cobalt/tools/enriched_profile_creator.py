@@ -129,14 +129,17 @@ _LIST_FIELD_ALIASES: dict[str, str] = {
     "certifications":       "_certifications",
     "customer_segments":    "_customer_segments",
     "products_and_services": "_products_and_services",
+    "key_people":           "_key_people",
 }
 
 _IDENTITY_FIELDS      = ["website", "description", "hq_city", "hq_country",
-                          "founding_year", "company_status"]
+                          "founding_year", "company_status", "legal_name", "lei",
+                          "registration_number", "jurisdiction", "incorporation_date",
+                          "hq_address", "registered_address", "linkedin_url"]
 _CLASSIFICATION_FIELDS = ["category", "subcategory", "industry", "vendor_type",
                            "primary_use_case", "additional_categories"]
 _SIZE_FIELDS           = ["employee_count_range", "company_size_band", "revenue_range",
-                           "funding_stage", "ticker", "exchange"]
+                           "funding_stage", "ticker", "exchange", "revenue"]
 
 
 # ---------------------------------------------------------------------------
@@ -561,6 +564,7 @@ def _build_vendor_profile(
         certifications=_get_list("_certifications", reconciled_fields),
         customer_segments=_get_list("_customer_segments", reconciled_fields),
         reputation_signals=_get_list("_reputation_signals", reconciled_fields),
+        key_people=_get_list("_key_people", reconciled_fields),
         lifecycle_signals=relationship_result.lifecycle_signals,
         gaps=gaps,
         flags=flags,
@@ -717,23 +721,28 @@ def _record_failed_enrichment(
     error_msg: str,
     now: str,
 ) -> None:
-    """Append a FAILED_ENRICHMENT record to coverage.md. Swallow all errors."""
+    """Append a FAILED_ENRICHMENT record to the vendor's change_log. Swallows all errors."""
     if not programme_id:
         return
     try:
-        coverage_path = (
-            workspace_root / programme_id / f"v-{vendor_id}" / "cost_file" / "coverage.md"
-        )
-        entry_yaml = yaml.dump(
-            {"enrichment_ledger_entry": {
-                "enriched_at":    now,
-                "profile_status": "FAILED_ENRICHMENT",
-                "error":          error_msg,
-            }},
-            default_flow_style=False,
-        )
-        append_md(coverage_path, f"---\n{entry_yaml}---",
-                  vendor_id=vendor_id, programme_id=programme_id)
+        from cobalt.core.atomic_write import atomic_write
+        from cobalt.core.file_system import _find_vendor_file, read_md
+
+        file_path = _find_vendor_file(programme_id, vendor_id, workspace_root)
+        if file_path is None:
+            logger.warning("Could not find vendor file for FAILED_ENRICHMENT record: %s", vendor_id)
+            return
+
+        existing_data = read_md(file_path) or {}
+        change_log = list(existing_data.get("change_log") or [])
+        change_log.append({
+            "event":          "ENRICHMENT_FAILED",
+            "enriched_at":    now,
+            "profile_status": "FAILED_ENRICHMENT",
+            "error":          error_msg,
+        })
+        existing_data["change_log"] = change_log
+        atomic_write(file_path, existing_data, vendor_id=vendor_id, programme_id=programme_id)
     except Exception:
         logger.warning("Could not record FAILED_ENRICHMENT ledger entry for %s", vendor_id)
 
@@ -808,13 +817,9 @@ def create_enriched_profile(
             profile, unresolved_conflicts, extracted, relationship_result, readiness
         )
 
-        # Step 11 — Write vendor_profile.md (atomic)
+        # Step 11 — Write vendor_profile.md (atomic). ENRICHMENT_COMPLETED entry is
+        # appended to change_log inside write_vendor_profile — no separate ledger write needed.
         profile_path = _write_vendor_profile(profile, programme_id or "", v_id, workspace)
-
-        # Step 12 — Append enrichment ledger entry to coverage.md
-        _append_enrichment_ledger(
-            programme_id or "", v_id, workspace, profile, pcs_before, pcs_after, now
-        )
 
         return EnrichedProfileResult(
             vendor_id=v_id,

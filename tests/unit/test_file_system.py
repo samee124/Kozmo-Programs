@@ -12,25 +12,13 @@ def test_vendor_path_returns_correct_path(tmp_workspace):
     assert result == tmp_workspace / "prog1" / "vendor_a"
 
 
-def test_init_vendor_workspace_creates_all_subdirs(tmp_workspace):
+def test_init_vendor_workspace_creates_root_dir(tmp_workspace):
     fs.init_vendor_workspace("prog1", "vendor_a")
     root = fs.vendor_path("prog1", "vendor_a")
-    expected = [
-        "identity",
-        "cost_file",
-        "evidence",
-        "inference",
-        "evaluation",
-        "execution",
-        "execution/campaigns",
-        "intake",
-        "communication",
-        "communication/checkins",
-        "connectors",
-        "connectors/logs",
-    ]
-    for subdir in expected:
-        assert (root / subdir).is_dir(), f"Missing subdir: {subdir}"
+    assert root.is_dir()
+    # Single-file architecture: no subdirectories are created
+    subdirs = [p for p in root.iterdir() if p.is_dir()]
+    assert subdirs == []
 
 
 def test_init_programme_workspace_creates_required_dirs(tmp_workspace):
