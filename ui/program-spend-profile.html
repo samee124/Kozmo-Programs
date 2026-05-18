@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Cobalt — Programme</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body { font-family: 'Inter', system-ui, sans-serif; }
+    .badge { display: inline-flex; align-items: center; padding: 2px 8px; border-radius: 9999px; font-size: 11px; font-weight: 600; }
+    .stage-1 { background: #FEF3C7; color: #92400E; }
+    .stage-2 { background: #DBEAFE; color: #1E40AF; }
+    .stage-3 { background: #D1FAE5; color: #065F46; }
+    tr:hover { background: #F9FAFB; }
+  </style>
+</head>
+<body class="bg-gray-50 min-h-screen">
+
+  <!-- Header -->
+  <header class="bg-white border-b border-gray-200 px-8 py-4 flex items-center gap-3">
+    <a href="/" class="w-8 h-8 bg-indigo-600 rounded-lg flex items-center justify-center">
+      <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/>
+      </svg>
+    </a>
+    <span class="text-xl font-bold text-gray-900 tracking-tight">Cobalt</span>
+    <span class="text-gray-300 mx-2">/</span>
+    <span id="prog-label" class="text-gray-700 font-medium text-sm"></span>
+  </header>
+
+  <main class="max-w-7xl mx-auto px-6 py-8">
+    <!-- Programme header -->
+    <div class="mb-6 flex items-center justify-between">
+      <div>
+        <h1 id="prog-title" class="text-2xl font-bold text-gray-900"></h1>
+        <p id="prog-meta" class="text-gray-400 text-sm mt-1"></p>
+      </div>
+    </div>
+
+    <!-- Stats strip -->
+    <div id="stats" class="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-8"></div>
+
+    <!-- Search + filter -->
+    <div class="flex items-center gap-3 mb-4">
+      <input id="search" type="text" placeholder="Search vendors…"
+        class="border border-gray-200 rounded-lg px-3 py-2 text-sm w-64 focus:outline-none focus:ring-2 focus:ring-indigo-300">
+      <select id="filter-status" class="border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300">
+        <option value="">All statuses</option>
+        <option value="FULLY_ENRICHED">Fully Enriched</option>
+        <option value="PARTIALLY_ENRICHED">Partially Enriched</option>
+        <option value="INTAKE_COMPLETED">Intake Only</option>
+      </select>
+    </div>
+
+    <!-- Vendor table -->
+    <div class="bg-white rounded-xl border border-gray-200 overflow-hidden">
+      <table class="w-full text-sm">
+        <thead class="bg-gray-50 border-b border-gray-200">
+          <tr>
+            <th class="text-left px-4 py-3 font-semibold text-gray-600 w-8">#</th>
+            <th class="text-left px-4 py-3 font-semibold text-gray-600">Vendor</th>
+            <th class="text-left px-4 py-3 font-semibold text-gray-600">Category</th>
+            <th class="text-left px-4 py-3 font-semibold text-gray-600">Country</th>
+            <th class="text-left px-4 py-3 font-semibold text-gray-600">Status</th>
+            <th class="text-left px-4 py-3 font-semibold text-gray-600">Confidence</th>
+            <th class="text-left px-4 py-3 font-semibold text-gray-600">PCS</th>
+          </tr>
+        </thead>
+        <tbody id="vendor-table-body" class="divide-y divide-gray-100"></tbody>
+      </table>
+      <div id="table-loading" class="text-center py-10 text-gray-400 text-sm">Loading vendors…</div>
+      <div id="table-empty" class="hidden text-center py-10 text-gray-400 text-sm">No vendors match your filter.</div>
+    </div>
+  </main>
+
+  <script>
+    const params = new URLSearchParams(location.search);
+    const progId = params.get('prog') || '';
+    let allVendors = [];
+
+    const CONF_COLOR = { HIGH: 'text-green-600', MEDIUM: 'text-yellow-600', LOW: 'text-red-500', MISSING: 'text-gray-400' };
+    const STATUS_BADGE = {
+      FULLY_ENRICHED:     'bg-green-100 text-green-700',
+      PARTIALLY_ENRICHED: 'bg-yellow-100 text-yellow-700',
+      INTAKE_COMPLETED:   'bg-blue-100 text-blue-700',
+    };
+
+    function confBadge(val) {
+      if (!val) return '<span class="text-gray-300">—</span>';
+      const pct = Math.round(parseFloat(val) * 100);
+      const cls = pct >= 80 ? 'text-green-600' : pct >= 60 ? 'text-yellow-600' : 'text-red-500';
+      return `<span class="${cls} font-medium">${pct}%</span>`;
+    }
+
+    function statusBadge(s) {
+      const cls = STATUS_BADGE[s] || 'bg-gray-100 text-gray-600';
+      const label = s ? s.replace(/_/g, ' ') : 'Unknown';
+      return `<span class="badge ${cls}">${label}</span>`;
+    }
+
+    function statCard(label, value, sub) {
+      return `<div class="bg-white rounded-xl border border-gray-200 p-4">
+        <div class="text-xs text-gray-400 mb-1">${label}</div>
+        <div class="text-2xl font-bold text-gray-900">${value}</div>
+        ${sub ? `<div class="text-xs text-gray-400 mt-1">${sub}</div>` : ''}
+      </div>`;
+    }
+
+    function renderTable(vendors) {
+      const tbody = document.getElementById('vendor-table-body');
+      const empty = document.getElementById('table-empty');
+      if (vendors.length === 0) {
+        tbody.innerHTML = '';
+        empty.classList.remove('hidden');
+        return;
+      }
+      empty.classList.add('hidden');
+      tbody.innerHTML = vendors.map((v, i) => `
+        <tr class="cursor-pointer" onclick="location.href='/vendor?prog=${progId}&id=${v.vendor_id}'">
+          <td class="px-4 py-3 text-gray-300 text-xs">${i + 1}</td>
+          <td class="px-4 py-3">
+            <div class="font-medium text-gray-900">${v.vendor_name}</div>
+            ${v.input_name && v.input_name !== v.vendor_name ? `<div class="text-xs text-gray-400">${v.input_name}</div>` : ''}
+          </td>
+          <td class="px-4 py-3 text-gray-600">${v.category || '<span class="text-gray-300">—</span>'}</td>
+          <td class="px-4 py-3 text-gray-600">${v.hq_country || '<span class="text-gray-300">—</span>'}</td>
+          <td class="px-4 py-3">${statusBadge(v.status)}</td>
+          <td class="px-4 py-3">${confBadge(v.identity_confidence)}</td>
+          <td class="px-4 py-3 text-gray-600">${v.pcs_band || '<span class="text-gray-300">—</span>'}</td>
+        </tr>
+      `).join('');
+    }
+
+    function applyFilters() {
+      const q = document.getElementById('search').value.toLowerCase();
+      const st = document.getElementById('filter-status').value;
+      const filtered = allVendors.filter(v => {
+        const matchQ = !q || v.vendor_name.toLowerCase().includes(q) || (v.input_name || '').toLowerCase().includes(q);
+        const matchSt = !st || v.status === st;
+        return matchQ && matchSt;
+      });
+      renderTable(filtered);
+    }
+
+    document.getElementById('search').addEventListener('input', applyFilters);
+    document.getElementById('filter-status').addEventListener('change', applyFilters);
+
+    async function load() {
+      if (!progId) { document.getElementById('prog-title').textContent = 'No programme specified'; return; }
+
+      // Load programme meta
+      try {
+        const r = await fetch(`/api/programmes/${progId}`);
+        const p = await r.json();
+        document.title = `Cobalt — ${p.label}`;
+        document.getElementById('prog-title').textContent = p.label;
+        document.getElementById('prog-label').textContent = p.label;
+        document.getElementById('prog-meta').textContent = `${p.vendor_count} vendors`;
+      } catch {}
+
+      // Load stats
+      try {
+        const r = await fetch(`/api/programmes/${progId}/stats`);
+        const s = await r.json();
+        document.getElementById('stats').innerHTML =
+          statCard('Total Vendors', s.total_vendors) +
+          statCard('With Contract', s.with_contract, `${s.without_contract} without`) +
+          statCard('With Spend Data', s.with_spend) +
+          statCard('Avg Confidence', Math.round((s.avg_identity_confidence || 0) * 100) + '%');
+      } catch {}
+
+      // Load vendors
+      try {
+        const r = await fetch(`/api/programmes/${progId}/vendors`);
+        allVendors = await r.json();
+        document.getElementById('table-loading').classList.add('hidden');
+        renderTable(allVendors);
+      } catch (e) {
+        document.getElementById('table-loading').textContent = 'Failed to load vendors: ' + e.message;
+      }
+    }
+    load();
+  </script>
+</body>
+</html>

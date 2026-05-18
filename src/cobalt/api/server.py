@@ -90,6 +90,11 @@ def _infer_stage(vp: Path) -> int:
     return 1
 
 
+def _v(section: dict, key: str) -> Any:
+    fd = section.get(key)
+    return fd.get("value") if isinstance(fd, dict) else fd
+
+
 def _vendor_summary(vp: Path) -> dict[str, Any]:
     fm = _read_vendor(vp)
     intake = fm.get("intake") or {}
@@ -98,10 +103,6 @@ def _vendor_summary(vp: Path) -> dict[str, Any]:
     legal = fm.get("legal") or {}
     classification = fm.get("classification") or {}
     pcs = fm.get("pcs") or {}
-
-    def _v(section: dict, key: str):
-        fd = section.get(key)
-        return fd.get("value") if isinstance(fd, dict) else fd
 
     evidence_count = len(fm.get("commercial", {}).get("documents") or [])
 
@@ -115,7 +116,9 @@ def _vendor_summary(vp: Path) -> dict[str, Any]:
         "data_class": intake.get("data_class"),
         "category": _v(classification, "category"),
         "hq_country": _v(identity, "hq_country"),
-        "legal_entity": entity.get("legal_entity"),
+        "hq_city": _v(identity, "hq_city"),
+        "status": fm.get("status"),
+        "overall_confidence": fm.get("overall_confidence"),
         # spend
         "annual_spend": _v(financial, "annual_spend"),
         "spend_status": financial.get("spend_status"),
@@ -264,18 +267,34 @@ def get_vendor(prog_id: str, vendor_id: str) -> dict:
         raise HTTPException(404, f"Vendor '{vendor_id}' not found in programme '{prog_id}'")
 
     summary = _vendor_summary(vp)
-
-    # Full legal terms from vendor file
     vendor_data = _read_vendor(vp)
+
+    # Full enriched profile sections
+    summary["identity_full"] = vendor_data.get("identity") or {}
+    summary["classification_full"] = vendor_data.get("classification") or {}
+    summary["size_full"] = vendor_data.get("size") or {}
+    summary["organisation"] = vendor_data.get("organisation") or {}
+    summary["products_and_services"] = vendor_data.get("products_and_services") or []
+    summary["key_people"] = vendor_data.get("key_people") or []
+    summary["reputation_signals"] = vendor_data.get("reputation_signals") or []
+    summary["lifecycle_signals"] = vendor_data.get("lifecycle_signals") or []
+    summary["certifications"] = vendor_data.get("certifications") or []
+    summary["competitors"] = vendor_data.get("competitors") or []
+    summary["customer_segments"] = vendor_data.get("customer_segments") or []
+    summary["flags"] = vendor_data.get("flags") or []
+    summary["gaps"] = vendor_data.get("gaps") or {}
+    summary["enrichment_metadata"] = vendor_data.get("enrichment_metadata") or {}
+    summary["enriched_at"] = vendor_data.get("enriched_at")
     summary["legal_raw"] = vendor_data.get("legal") or {}
-    summary["contract_raw"] = vendor_data.get("legal") or {}
+    summary["pcs_full"] = vendor_data.get("pcs") or {}
 
     # Evidence (documents stored inline)
     commercial = vendor_data.get("commercial") or {}
     summary["evidence"] = commercial.get("documents") or []
 
-    # Change log acts as ledger
+    # Change log
     change_log = vendor_data.get("change_log") or []
+    summary["change_log"] = change_log
     summary["has_ledger"] = len(change_log) > 0
 
     return summary

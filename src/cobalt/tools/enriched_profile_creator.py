@@ -38,6 +38,8 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 SOURCE_PRIORITY: dict[str, int] = {
+    "CONTRACT":        0,  # vendor signed it — highest trust, same as OFFICIAL
+    "contract":        0,
     "COMPANY_WEBSITE": 1,
     "REGISTRY":        2,
     "LINKEDIN":        3,

@@ -1,0 +1,531 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Cobalt — Vendor</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body { font-family: 'Inter', system-ui, sans-serif; }
+
+    /* Tab active state */
+    .tab-btn { border-bottom: 2px solid transparent; }
+    .tab-btn.active { border-bottom-color: #4F46E5; color: #4F46E5; }
+
+    /* Confidence badge colours */
+    .conf-HIGH     { background:#D1FAE5; color:#065F46; }
+    .conf-MEDIUM   { background:#FEF3C7; color:#92400E; }
+    .conf-LOW      { background:#FEE2E2; color:#991B1B; }
+    .conf-INFERRED { background:#EDE9FE; color:#5B21B6; }
+    .conf-CONFLICT { background:#FEE2E2; color:#7F1D1D; }
+    .conf-MISSING  { background:#F3F4F6; color:#9CA3AF; }
+
+    /* Status badge */
+    .status-FULLY_ENRICHED     { background:#D1FAE5; color:#065F46; }
+    .status-PARTIALLY_ENRICHED { background:#FEF3C7; color:#92400E; }
+    .status-INTAKE_COMPLETED   { background:#DBEAFE; color:#1E40AF; }
+
+    /* Flag chip */
+    .flag-chip { background:#FFF3CD; color:#856404; border:1px solid #FFDDA0; }
+    .flag-gap  { background:#F8D7DA; color:#721C24; border:1px solid #F5C6CB; }
+
+    .field-row { display:grid; grid-template-columns: 160px 1fr 90px 90px; gap:8px; align-items:start; padding:8px 0; border-bottom:1px solid #F3F4F6; }
+    .field-row:last-child { border-bottom:none; }
+    .field-label { font-size:12px; color:#6B7280; font-weight:500; text-transform:uppercase; letter-spacing:.03em; padding-top:2px; }
+    .field-value { font-size:14px; color:#111827; }
+    .field-value a { color:#4F46E5; text-decoration:underline; }
+    .field-null { font-size:14px; color:#D1D5DB; }
+    .source-tag { font-size:10px; background:#F3F4F6; color:#6B7280; border-radius:4px; padding:1px 5px; font-family:monospace; }
+    .badge { display:inline-flex; align-items:center; padding:2px 8px; border-radius:9999px; font-size:11px; font-weight:600; }
+  </style>
+</head>
+<body class="bg-gray-50 min-h-screen">
+
+  <!-- Header -->
+  <header class="bg-white border-b border-gray-200 px-6 py-3 flex items-center gap-3">
+    <a href="/" class="w-7 h-7 bg-indigo-600 rounded-lg flex items-center justify-center flex-shrink-0">
+      <svg class="w-4 h-4 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/>
+      </svg>
+    </a>
+    <span class="font-bold text-gray-900">Cobalt</span>
+    <span class="text-gray-300 mx-1">/</span>
+    <a id="nav-prog" href="#" class="text-gray-500 text-sm hover:text-indigo-600"></a>
+    <span class="text-gray-300 mx-1">/</span>
+    <span id="nav-vendor" class="text-gray-700 text-sm font-medium"></span>
+  </header>
+
+  <!-- Vendor hero -->
+  <div class="bg-white border-b border-gray-200 px-6 py-5">
+    <div class="max-w-6xl mx-auto">
+      <div class="flex items-start justify-between gap-4">
+        <div class="flex-1 min-w-0">
+          <div class="flex items-center gap-3 flex-wrap">
+            <h1 id="vendor-name" class="text-2xl font-bold text-gray-900"></h1>
+            <span id="vendor-status-badge" class="badge"></span>
+          </div>
+          <p id="vendor-description" class="text-gray-500 text-sm mt-2 max-w-2xl leading-relaxed"></p>
+          <!-- Quick pills -->
+          <div id="quick-pills" class="flex items-center gap-2 mt-3 flex-wrap"></div>
+        </div>
+        <!-- PCS score -->
+        <div class="flex-shrink-0 text-center">
+          <div id="pcs-ring" class="w-20 h-20 rounded-full border-4 border-indigo-200 flex flex-col items-center justify-center">
+            <span id="pcs-score" class="text-xl font-bold text-indigo-600"></span>
+            <span class="text-xs text-gray-400">PCS</span>
+          </div>
+          <div id="pcs-band" class="text-xs text-gray-400 mt-1"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Tabs -->
+  <div class="bg-white border-b border-gray-200 px-6">
+    <div class="max-w-6xl mx-auto flex gap-0">
+      <button class="tab-btn active px-4 py-3 text-sm font-medium text-gray-700 focus:outline-none" onclick="showTab('identity')">Identity</button>
+      <button class="tab-btn px-4 py-3 text-sm font-medium text-gray-500 hover:text-gray-700 focus:outline-none" onclick="showTab('classification')">Classification &amp; Size</button>
+      <button class="tab-btn px-4 py-3 text-sm font-medium text-gray-500 hover:text-gray-700 focus:outline-none" onclick="showTab('products')">Products &amp; People</button>
+      <button class="tab-btn px-4 py-3 text-sm font-medium text-gray-500 hover:text-gray-700 focus:outline-none" onclick="showTab('signals')">Signals &amp; Reputation</button>
+      <button class="tab-btn px-4 py-3 text-sm font-medium text-gray-500 hover:text-gray-700 focus:outline-none" onclick="showTab('enrichment')">Enrichment Info</button>
+    </div>
+  </div>
+
+  <!-- Tab panels -->
+  <div class="max-w-6xl mx-auto px-6 py-6 grid grid-cols-1 lg:grid-cols-3 gap-6">
+
+    <!-- LEFT: main panels -->
+    <div class="lg:col-span-2 space-y-6">
+
+      <!-- IDENTITY TAB -->
+      <div id="tab-identity" class="space-y-4">
+        <div class="bg-white rounded-xl border border-gray-200 p-5">
+          <h2 class="text-sm font-semibold text-gray-700 mb-4 uppercase tracking-wider">Identity Fields</h2>
+          <div id="identity-fields"></div>
+        </div>
+        <div class="bg-white rounded-xl border border-gray-200 p-5">
+          <h2 class="text-sm font-semibold text-gray-700 mb-4 uppercase tracking-wider">Organisation</h2>
+          <div id="org-fields"></div>
+        </div>
+      </div>
+
+      <!-- CLASSIFICATION & SIZE TAB -->
+      <div id="tab-classification" class="hidden space-y-4">
+        <div class="bg-white rounded-xl border border-gray-200 p-5">
+          <h2 class="text-sm font-semibold text-gray-700 mb-4 uppercase tracking-wider">Classification</h2>
+          <div id="classification-fields"></div>
+        </div>
+        <div class="bg-white rounded-xl border border-gray-200 p-5">
+          <h2 class="text-sm font-semibold text-gray-700 mb-4 uppercase tracking-wider">Size &amp; Financials</h2>
+          <div id="size-fields"></div>
+        </div>
+      </div>
+
+      <!-- PRODUCTS & PEOPLE TAB -->
+      <div id="tab-products" class="hidden space-y-4">
+        <div class="bg-white rounded-xl border border-gray-200 p-5">
+          <h2 class="text-sm font-semibold text-gray-700 mb-4 uppercase tracking-wider">Products &amp; Services</h2>
+          <div id="products-list"></div>
+        </div>
+        <div class="bg-white rounded-xl border border-gray-200 p-5">
+          <h2 class="text-sm font-semibold text-gray-700 mb-4 uppercase tracking-wider">Key People</h2>
+          <div id="people-list"></div>
+        </div>
+        <div class="bg-white rounded-xl border border-gray-200 p-5">
+          <h2 class="text-sm font-semibold text-gray-700 mb-4 uppercase tracking-wider">Competitors</h2>
+          <div id="competitors-list"></div>
+        </div>
+      </div>
+
+      <!-- SIGNALS & REPUTATION TAB -->
+      <div id="tab-signals" class="hidden space-y-4">
+        <div class="bg-white rounded-xl border border-gray-200 p-5">
+          <h2 class="text-sm font-semibold text-gray-700 mb-4 uppercase tracking-wider">Reputation Signals</h2>
+          <div id="reputation-list"></div>
+        </div>
+        <div class="bg-white rounded-xl border border-gray-200 p-5">
+          <h2 class="text-sm font-semibold text-gray-700 mb-4 uppercase tracking-wider">Lifecycle Signals</h2>
+          <div id="lifecycle-list"></div>
+        </div>
+        <div class="bg-white rounded-xl border border-gray-200 p-5">
+          <h2 class="text-sm font-semibold text-gray-700 mb-4 uppercase tracking-wider">Certifications</h2>
+          <div id="cert-list"></div>
+        </div>
+      </div>
+
+      <!-- ENRICHMENT INFO TAB -->
+      <div id="tab-enrichment" class="hidden space-y-4">
+        <div class="bg-white rounded-xl border border-gray-200 p-5">
+          <h2 class="text-sm font-semibold text-gray-700 mb-4 uppercase tracking-wider">Sources Used</h2>
+          <div id="sources-list"></div>
+        </div>
+        <div class="bg-white rounded-xl border border-gray-200 p-5">
+          <h2 class="text-sm font-semibold text-gray-700 mb-4 uppercase tracking-wider">Data Gaps</h2>
+          <div id="gaps-list"></div>
+        </div>
+        <div class="bg-white rounded-xl border border-gray-200 p-5">
+          <h2 class="text-sm font-semibold text-gray-700 mb-4 uppercase tracking-wider">Change Log</h2>
+          <div id="changelog-list"></div>
+        </div>
+      </div>
+
+    </div>
+
+    <!-- RIGHT: sidebar -->
+    <div class="space-y-4">
+      <!-- Flags -->
+      <div class="bg-white rounded-xl border border-gray-200 p-5">
+        <h2 class="text-xs font-semibold text-gray-500 mb-3 uppercase tracking-wider">Flags</h2>
+        <div id="flags-list"></div>
+      </div>
+      <!-- Intake summary -->
+      <div class="bg-white rounded-xl border border-gray-200 p-5">
+        <h2 class="text-xs font-semibold text-gray-500 mb-3 uppercase tracking-wider">Intake Summary</h2>
+        <div id="intake-summary"></div>
+      </div>
+      <!-- Enrichment metadata -->
+      <div class="bg-white rounded-xl border border-gray-200 p-5">
+        <h2 class="text-xs font-semibold text-gray-500 mb-3 uppercase tracking-wider">Enrichment Metadata</h2>
+        <div id="enrich-meta"></div>
+      </div>
+    </div>
+
+  </div>
+
+  <div id="page-loading" class="fixed inset-0 bg-white flex items-center justify-center z-50">
+    <div class="text-gray-400 text-sm">Loading vendor profile…</div>
+  </div>
+
+  <script>
+    const params = new URLSearchParams(location.search);
+    const progId = params.get('prog') || '';
+    const vendorId = params.get('id') || '';
+    let vendorData = null;
+
+    // ── Tab switching ─────────────────────────────────────────────────────────
+    function showTab(name) {
+      ['identity','classification','products','signals','enrichment'].forEach(t => {
+        document.getElementById('tab-' + t).classList.toggle('hidden', t !== name);
+      });
+      document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+      event.target.classList.add('active');
+    }
+
+    // ── Helpers ───────────────────────────────────────────────────────────────
+    function confBadge(c) {
+      if (!c || c === 'MISSING') return '<span class="badge conf-MISSING">MISSING</span>';
+      return `<span class="badge conf-${c}">${c}</span>`;
+    }
+
+    function sourceTag(s) {
+      if (!s) return '';
+      return `<span class="source-tag">${s}</span>`;
+    }
+
+    function fieldRow(label, fieldObj) {
+      if (!fieldObj || typeof fieldObj !== 'object') {
+        return `<div class="field-row">
+          <div class="field-label">${label}</div>
+          <div class="field-null">—</div><div></div><div></div>
+        </div>`;
+      }
+      const val = fieldObj.value;
+      const conf = fieldObj.confidence;
+      const src = fieldObj.source;
+      let valHtml;
+      if (val === null || val === undefined || val === '') {
+        valHtml = '<span class="field-null">—</span>';
+      } else if (typeof val === 'string' && (val.startsWith('http://') || val.startsWith('https://'))) {
+        valHtml = `<a href="${val}" target="_blank" class="field-value break-all">${val}</a>`;
+      } else {
+        valHtml = `<span class="field-value">${val}</span>`;
+      }
+      return `<div class="field-row">
+        <div class="field-label">${label}</div>
+        <div>${valHtml}</div>
+        <div>${confBadge(conf)}</div>
+        <div>${sourceTag(src)}</div>
+      </div>`;
+    }
+
+    function simpleKV(label, value) {
+      return `<div class="flex justify-between items-start py-1.5 border-b border-gray-100 last:border-0">
+        <span class="text-xs text-gray-400 uppercase tracking-wide">${label}</span>
+        <span class="text-sm text-gray-800 font-medium text-right max-w-xs">${value || '<span class="text-gray-300">—</span>'}</span>
+      </div>`;
+    }
+
+    function emptyState(msg) {
+      return `<p class="text-sm text-gray-300 italic">${msg}</p>`;
+    }
+
+    // ── Render functions ──────────────────────────────────────────────────────
+    function renderHero(v) {
+      document.title = `Cobalt — ${v.vendor_name}`;
+      document.getElementById('vendor-name').textContent = v.vendor_name;
+      document.getElementById('nav-vendor').textContent = v.vendor_name;
+      document.getElementById('nav-prog').textContent = progId;
+      document.getElementById('nav-prog').href = `/programme?prog=${progId}`;
+
+      const s = v.status || '';
+      const statusEl = document.getElementById('vendor-status-badge');
+      statusEl.textContent = s.replace(/_/g, ' ');
+      statusEl.className = `badge status-${s}`;
+
+      const desc = (v.identity_full || {}).description;
+      const descVal = desc && desc.value ? desc.value : '';
+      document.getElementById('vendor-description').textContent = descVal;
+
+      // PCS
+      const pcs = v.pcs_full || {};
+      const score = pcs.score ?? v.overall_pcs;
+      document.getElementById('pcs-score').textContent = score != null ? Math.round(score * 100) : '—';
+      document.getElementById('pcs-band').textContent = pcs.band || v.pcs_band || '';
+
+      // Quick pills
+      const pills = [];
+      if (v.category) pills.push(`<span class="text-xs bg-indigo-50 text-indigo-700 rounded-full px-3 py-1">${v.category}</span>`);
+      if (v.hq_country) pills.push(`<span class="text-xs bg-gray-100 text-gray-600 rounded-full px-3 py-1">🌍 ${v.hq_country}</span>`);
+      const wv = (v.identity_full || {}).website;
+      if (wv && wv.value) pills.push(`<a href="${wv.value}" target="_blank" class="text-xs bg-blue-50 text-blue-600 rounded-full px-3 py-1 hover:underline">🔗 Website</a>`);
+      const li = (v.identity_full || {}).linkedin_url;
+      if (li && li.value) pills.push(`<a href="${li.value}" target="_blank" class="text-xs bg-blue-50 text-blue-700 rounded-full px-3 py-1 hover:underline">in LinkedIn</a>`);
+      const conf = v.overall_confidence;
+      if (conf) pills.push(`<span class="text-xs badge conf-${conf}">Overall: ${conf}</span>`);
+      document.getElementById('quick-pills').innerHTML = pills.join('');
+    }
+
+    function renderIdentity(v) {
+      const id = v.identity_full || {};
+      const FIELDS = [
+        ['Legal Name', id.legal_name],
+        ['Company Status', id.company_status],
+        ['Founding Year', id.founding_year],
+        ['Incorporation Date', id.incorporation_date],
+        ['HQ City', id.hq_city],
+        ['HQ Country', id.hq_country],
+        ['HQ Address', id.hq_address],
+        ['Registered Address', id.registered_address],
+        ['Jurisdiction', id.jurisdiction],
+        ['Registration #', id.registration_number],
+        ['LEI', id.lei],
+        ['Website', id.website],
+        ['LinkedIn', id.linkedin_url],
+      ];
+      document.getElementById('identity-fields').innerHTML =
+        `<div class="text-xs grid grid-cols-4 gap-2 pb-2 mb-1 border-b border-gray-100 font-semibold text-gray-400 uppercase tracking-wider">
+          <div>Field</div><div>Value</div><div>Confidence</div><div>Source</div>
+         </div>` +
+        FIELDS.map(([l, f]) => fieldRow(l, f)).join('');
+
+      // Org
+      const org = v.organisation || {};
+      const orgLines = [];
+      if (org.parent_company) orgLines.push(simpleKV('Parent Company', org.parent_company));
+      if (org.former_names && org.former_names.length > 0)
+        orgLines.push(simpleKV('Former Names', org.former_names.map(n => n.name || n).join(', ')));
+      if (org.brands && org.brands.length > 0)
+        orgLines.push(simpleKV('Brands', org.brands.join(', ')));
+      if (org.subsidiaries && org.subsidiaries.length > 0)
+        orgLines.push(simpleKV('Subsidiaries', org.subsidiaries.join(', ')));
+      document.getElementById('org-fields').innerHTML = orgLines.length ? orgLines.join('') : emptyState('No organisation data available.');
+    }
+
+    function renderClassification(v) {
+      const cl = v.classification_full || {};
+      const CL_FIELDS = [
+        ['Category', cl.category],
+        ['Subcategory', cl.subcategory],
+        ['Industry', cl.industry],
+        ['Vendor Type', cl.vendor_type],
+        ['Primary Use Case', cl.primary_use_case],
+        ['Additional Categories', cl.additional_categories],
+      ];
+      document.getElementById('classification-fields').innerHTML =
+        `<div class="text-xs grid grid-cols-4 gap-2 pb-2 mb-1 border-b border-gray-100 font-semibold text-gray-400 uppercase tracking-wider">
+          <div>Field</div><div>Value</div><div>Confidence</div><div>Source</div>
+         </div>` +
+        CL_FIELDS.map(([l, f]) => fieldRow(l, f)).join('');
+
+      const sz = v.size_full || {};
+      const SZ_FIELDS = [
+        ['Size Band', sz.company_size_band],
+        ['Employee Count', sz.employee_count_range],
+        ['Funding Stage', sz.funding_stage],
+        ['Revenue Range', sz.revenue_range],
+        ['Revenue', sz.revenue],
+        ['Exchange', sz.exchange],
+        ['Ticker', sz.ticker],
+      ];
+      document.getElementById('size-fields').innerHTML =
+        `<div class="text-xs grid grid-cols-4 gap-2 pb-2 mb-1 border-b border-gray-100 font-semibold text-gray-400 uppercase tracking-wider">
+          <div>Field</div><div>Value</div><div>Confidence</div><div>Source</div>
+         </div>` +
+        SZ_FIELDS.map(([l, f]) => fieldRow(l, f)).join('');
+    }
+
+    function renderProducts(v) {
+      const ps = v.products_and_services || [];
+      document.getElementById('products-list').innerHTML = ps.length ?
+        ps.map(p => `
+          <div class="flex items-start gap-3 py-3 border-b border-gray-100 last:border-0">
+            <span class="text-xs bg-indigo-50 text-indigo-600 rounded px-2 py-0.5 flex-shrink-0 mt-0.5">${p.type || 'SERVICE'}</span>
+            <div>
+              <div class="font-medium text-gray-900 text-sm">${p.name}</div>
+              <div class="text-gray-500 text-xs mt-0.5">${p.description || ''}</div>
+              ${p.source ? `<div class="mt-1">${sourceTag(p.source)}</div>` : ''}
+            </div>
+          </div>`).join('') : emptyState('No products or services found.');
+
+      const kp = v.key_people || [];
+      document.getElementById('people-list').innerHTML = kp.length ?
+        kp.map(p => `
+          <div class="flex items-center gap-3 py-2.5 border-b border-gray-100 last:border-0">
+            <div class="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center text-gray-500 text-sm font-semibold flex-shrink-0">
+              ${(p.name || '?')[0].toUpperCase()}
+            </div>
+            <div class="flex-1">
+              <div class="font-medium text-gray-900 text-sm">${p.name}</div>
+              <div class="text-gray-400 text-xs">${p.role || ''}</div>
+            </div>
+            ${p.source ? sourceTag(p.source) : ''}
+          </div>`).join('') : emptyState('No key people found.');
+
+      const comp = v.competitors || [];
+      document.getElementById('competitors-list').innerHTML = comp.length ?
+        comp.map(c => `<div class="py-2 border-b border-gray-100 last:border-0 text-sm text-gray-700">${typeof c === 'string' ? c : c.name || JSON.stringify(c)}</div>`).join('') :
+        emptyState('No competitors found.');
+    }
+
+    function renderSignals(v) {
+      const rep = v.reputation_signals || [];
+      document.getElementById('reputation-list').innerHTML = rep.length ?
+        rep.map(r => `
+          <div class="py-3 border-b border-gray-100 last:border-0">
+            <div class="flex items-center gap-2 mb-1">
+              <span class="text-xs badge conf-${r.signal_type === 'LEGAL' ? 'LOW' : 'MEDIUM'}">${r.signal_type || 'SIGNAL'}</span>
+              ${r.publication_date ? `<span class="text-xs text-gray-400">${r.publication_date}</span>` : ''}
+            </div>
+            <p class="text-sm text-gray-700">${r.description || ''}</p>
+            ${r.source_url ? `<a href="${r.source_url}" target="_blank" class="text-xs text-indigo-500 hover:underline mt-1 block truncate">${r.source_url}</a>` : ''}
+          </div>`).join('') : emptyState('No reputation signals found.');
+
+      const lc = v.lifecycle_signals || [];
+      document.getElementById('lifecycle-list').innerHTML = lc.length ?
+        lc.map(l => `
+          <div class="py-3 border-b border-gray-100 last:border-0">
+            <div class="flex items-center gap-2 mb-1">
+              <span class="text-xs badge conf-INFERRED">${l.signal_type || 'EVENT'}</span>
+              <span class="badge conf-${l.confidence || 'MISSING'}">${l.confidence || ''}</span>
+              ${l.date ? `<span class="text-xs text-gray-400">${l.date}</span>` : ''}
+            </div>
+            ${l.from ? `<div class="text-xs text-gray-500">From: <strong>${l.from}</strong>${l.to ? ` → <strong>${l.to}</strong>` : ''}</div>` : ''}
+          </div>`).join('') : emptyState('No lifecycle signals found.');
+
+      const cert = v.certifications || [];
+      document.getElementById('cert-list').innerHTML = cert.length ?
+        cert.map(c => `<div class="py-2 border-b border-gray-100 last:border-0 text-sm text-gray-700">${typeof c === 'string' ? c : JSON.stringify(c)}</div>`).join('') :
+        emptyState('No certifications found.');
+    }
+
+    function renderEnrichment(v) {
+      const meta = v.enrichment_metadata || {};
+      const sources = meta.sources_used || [];
+      const SOURCE_LABELS = {
+        web_search: 'Web Search', company_website: 'Company Website', linkedin: 'LinkedIn',
+        news: 'News', wikidata: 'Wikidata', wikipedia: 'Wikipedia',
+        gleif: 'GLEIF', opensanctions: 'OpenSanctions', search_discovery: 'Search Discovery',
+        companies_house: 'Companies House', sec_edgar: 'SEC EDGAR', opencorporates: 'OpenCorporates',
+      };
+      document.getElementById('sources-list').innerHTML = sources.length ?
+        `<div class="flex flex-wrap gap-2">` +
+        sources.map(s => `<span class="text-xs bg-indigo-50 text-indigo-700 rounded-full px-3 py-1 font-medium">${SOURCE_LABELS[s] || s}</span>`).join('') +
+        `</div>` +
+        `<div class="mt-3 text-xs text-gray-400">Depth tier: <strong class="text-gray-600">${meta.depth_tier || '—'}</strong> · PCS before: ${meta.pcs_before ?? '—'} → after: ${meta.pcs_after ?? '—'}</div>`
+        : emptyState('No enrichment metadata available.');
+
+      // Gaps
+      const gaps = v.gaps || {};
+      const enrichGaps = gaps.enrichment || [];
+      const blockGaps = gaps.blocking || [];
+      let gapsHtml = '';
+      if (blockGaps.length) {
+        gapsHtml += `<div class="mb-3"><div class="text-xs font-semibold text-red-600 mb-2">Blocking Gaps</div>
+          <div class="flex flex-wrap gap-1.5">${blockGaps.map(g => `<span class="badge flag-gap">${g}</span>`).join('')}</div></div>`;
+      }
+      if (enrichGaps.length) {
+        gapsHtml += `<div><div class="text-xs font-semibold text-yellow-600 mb-2">Enrichment Gaps</div>
+          <div class="flex flex-wrap gap-1.5">${enrichGaps.map(g => `<span class="text-xs bg-yellow-50 text-yellow-700 border border-yellow-200 rounded px-2 py-0.5">${g}</span>`).join('')}</div></div>`;
+      }
+      document.getElementById('gaps-list').innerHTML = gapsHtml || emptyState('No gaps recorded.');
+
+      // Change log
+      const cl = v.change_log || [];
+      document.getElementById('changelog-list').innerHTML = cl.length ?
+        cl.map(e => `
+          <div class="flex items-start gap-3 py-3 border-b border-gray-100 last:border-0">
+            <div class="w-2 h-2 rounded-full bg-indigo-400 mt-1.5 flex-shrink-0"></div>
+            <div>
+              <div class="text-sm font-medium text-gray-800">${e.event || '—'}</div>
+              <div class="text-xs text-gray-400">${e.enriched_at || ''}</div>
+              ${e.pcs_before != null ? `<div class="text-xs text-gray-400">PCS: ${e.pcs_before} → ${e.pcs_after}</div>` : ''}
+            </div>
+          </div>`).join('') : emptyState('No change log entries.');
+    }
+
+    function renderSidebar(v) {
+      // Flags
+      const flags = v.flags || [];
+      document.getElementById('flags-list').innerHTML = flags.length ?
+        `<div class="flex flex-wrap gap-1.5">${flags.map(f => `<span class="badge flag-chip text-xs">${f}</span>`).join('')}</div>` :
+        emptyState('No flags.');
+
+      // Intake summary
+      const intake = v;
+      document.getElementById('intake-summary').innerHTML = [
+        simpleKV('Input Name', intake.input_name),
+        simpleKV('Data Class', intake.data_class),
+        simpleKV('Resolution', intake.resolution_method),
+        simpleKV('Confidence', intake.identity_confidence != null ? Math.round(intake.identity_confidence * 100) + '%' : null),
+      ].join('');
+
+      // Enrich meta
+      const meta = v.enrichment_metadata || {};
+      document.getElementById('enrich-meta').innerHTML = [
+        simpleKV('Depth Tier', meta.depth_tier),
+        simpleKV('Enriched At', v.enriched_at ? v.enriched_at.replace('T', ' ').slice(0, 19) + ' UTC' : null),
+        simpleKV('PCS Before', meta.pcs_before),
+        simpleKV('PCS After', meta.pcs_after),
+      ].join('');
+    }
+
+    // ── Main load ─────────────────────────────────────────────────────────────
+    async function load() {
+      if (!progId || !vendorId) {
+        document.getElementById('vendor-name').textContent = 'No vendor specified';
+        document.getElementById('page-loading').classList.add('hidden');
+        return;
+      }
+      try {
+        const res = await fetch(`/api/programmes/${progId}/vendors/${vendorId}`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text()}`);
+        vendorData = await res.json();
+
+        renderHero(vendorData);
+        renderIdentity(vendorData);
+        renderClassification(vendorData);
+        renderProducts(vendorData);
+        renderSignals(vendorData);
+        renderEnrichment(vendorData);
+        renderSidebar(vendorData);
+      } catch (e) {
+        document.getElementById('vendor-name').textContent = 'Error loading vendor';
+        document.getElementById('vendor-description').textContent = e.message;
+      } finally {
+        document.getElementById('page-loading').classList.add('hidden');
+      }
+    }
+    load();
+  </script>
+</body>
+</html>

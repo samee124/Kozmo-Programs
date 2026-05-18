@@ -16,6 +16,7 @@ DEPTH_TIERS = frozenset({"BASIC", "STANDARD", "DEEP", "PROVISIONAL"})
 SOURCE_TYPES = frozenset({
     "WEB_SEARCH", "COMPANY_WEBSITE", "LINKEDIN", "REGISTRY", "FINANCIAL", "NEWS", "WIKIDATA",
     "GLEIF", "SANCTIONS", "WIKIPEDIA",
+    "CONTRACT",  # internal contract documents — OFFICIAL trust level
 })
 VALIDATION_STATUSES = frozenset({"CONFIRMED", "LIKELY", "UNCERTAIN", "REJECTED"})
 QUALITY_SIGNALS = frozenset({"OFFICIAL", "DIRECTORY", "NEWS", "SOCIAL"})
@@ -53,16 +54,17 @@ class KnownFacts:
 
 @dataclass
 class EnrichmentReadinessResult:
-    vendor_id:        str
-    proceed:          bool
-    skip:             bool
-    skip_reason:      str | None
-    depth_tier:       str
-    source_list:      list[str]
-    query_count:      int
-    known_facts:      KnownFacts
-    confidence_floor: float
-    flags:            list[str]
+    vendor_id:         str
+    proceed:           bool
+    skip:              bool
+    skip_reason:       str | None
+    depth_tier:        str
+    source_list:       list[str]
+    query_count:       int
+    known_facts:       KnownFacts
+    confidence_floor:  float
+    flags:             list[str]
+    contract_evidence: list[dict] = field(default_factory=list)
 
     def __post_init__(self) -> None:
         if self.depth_tier not in DEPTH_TIERS:

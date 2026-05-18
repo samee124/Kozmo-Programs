@@ -224,6 +224,7 @@ def normalize(
     # --- normalized_name (steps 1 + 3 only, then title-case) ---
     nm = cleaned.lower()
     nm = _apply_suffix_strip(nm, country_code)
+    nm = nm.rstrip(".,;: ")
     normalized_name = nm.title()
 
     # --- comparison_key (all 7 steps) ---

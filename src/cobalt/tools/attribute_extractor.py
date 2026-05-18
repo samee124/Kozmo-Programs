@@ -90,44 +90,52 @@ _SYSTEM_PROMPT = (
     "confidence=CONFLICT. Do not resolve disagreements yourself.\n"
     "If evidence is insufficient for a field, set value=null and confidence=MISSING. "
     "Do not invent values.\n"
+    "Valid confidence values: HIGH (primary authoritative source), MEDIUM (corroborated "
+    "secondary source), LOW (single low-quality source), INFERRED (derived logically), "
+    "CONFLICT (sources disagree), MISSING (no evidence). No other values are permitted.\n"
     "Marketing language has been stripped from the evidence. Treat "
     "[MARKETING_CLAIM_REMOVED] markers as redacted regions — they contained "
     "unverifiable promotional text.\n"
     "Note: WIKIDATA source items contain structured JSON facts (inception date, "
     "employee count, industries, headquarters). Treat WIKIDATA values as MEDIUM "
     "confidence unless corroborated by another source. WIKIDATA quality_signal is "
-    "DIRECTORY — it is a reference database, not an authoritative official filing."
+    "DIRECTORY — it is a reference database, not an authoritative official filing.\n"
+    "CONTRACT source items contain entity facts extracted from signed legal agreements "
+    "(MSA, SOW, DPA, framework agreements). The vendor's own lawyers signed these documents. "
+    "Treat CONTRACT values as HIGH confidence for: legal_name, registration_number, "
+    "jurisdiction, hq_address, registered_address, governing_law, vendor_type. "
+    "CONTRACT source outranks all external sources for these fields."
 )
 
 _OUTPUT_SCHEMA = """{
   "fields": {
     "website":              {"value": "<str|null>", "confidence": "HIGH|MEDIUM|LOW|MISSING", "source": "<source_type>"},
-    "description":          {"value": "<str|null>", "confidence": "...", "source": "..."},
-    "hq_city":              {"value": "<str|null>", "confidence": "...", "source": "..."},
-    "hq_country":           {"value": "<ISO-3166-1-alpha-2|null>", "confidence": "...", "source": "..."},
-    "hq_address":           {"value": "<full street address|null>", "confidence": "...", "source": "..."},
-    "registered_address":   {"value": "<registered office address|null>", "confidence": "...", "source": "..."},
-    "founding_year":        {"value": "<int|null>", "confidence": "...", "source": "..."},
-    "incorporation_date":   {"value": "<YYYY-MM-DD|null>", "confidence": "...", "source": "..."},
-    "company_status":       {"value": "<PUBLIC|PRIVATE|SUBSIDIARY|NON_PROFIT|UNKNOWN|null>", "confidence": "...", "source": "..."},
-    "legal_name":           {"value": "<official registered legal name|null>", "confidence": "...", "source": "..."},
-    "lei":                  {"value": "<20-char LEI code|null>", "confidence": "...", "source": "..."},
-    "registration_number":  {"value": "<company reg number|null>", "confidence": "...", "source": "..."},
-    "jurisdiction":         {"value": "<e.g. US-DE, GB, AU|null>", "confidence": "...", "source": "..."},
-    "linkedin_url":         {"value": "<LinkedIn company page URL|null>", "confidence": "...", "source": "..."},
-    "employee_count_range": {"value": "<1-10|11-50|51-200|201-500|501-1000|1001-5000|5001-10000|10000+|null>", "confidence": "...", "source": "..."},
-    "revenue_range":        {"value": "<<$1M|$1M-$10M|$10M-$50M|$50M-$100M|$100M-$500M|$500M-$1B|$1B-$10B|$10B+|null>", "confidence": "...", "source": "..."},
-    "revenue":              {"value": "<reported revenue string e.g. '$41.5B'|null>", "confidence": "...", "source": "..."},
-    "company_size_band":    {"value": "<STARTUP|SMB|MID_MARKET|ENTERPRISE|null>", "confidence": "...", "source": "..."},
-    "funding_stage":        {"value": "<BOOTSTRAPPED|SEED|SERIES_A|SERIES_B|SERIES_C_PLUS|PE_BACKED|PUBLIC|UNKNOWN|null>", "confidence": "...", "source": "..."},
-    "ticker":               {"value": "<str|null>", "confidence": "...", "source": "..."},
-    "exchange":             {"value": "<NYSE|NASDAQ|LSE|TSX|ASX|OTHER|null>", "confidence": "...", "source": "..."},
-    "category":             {"value": "<IT_SOFTWARE|PROFESSIONAL_SERVICES|FACILITIES|LOGISTICS|MARKETING|FINANCE|HR|OTHER|null>", "confidence": "...", "source": "..."},
-    "subcategory":          {"value": "<str|null>", "confidence": "...", "source": "..."},
-    "industry":             {"value": "<CROSS_INDUSTRY|FINANCIAL_SERVICES|HEALTHCARE|PUBLIC_SECTOR|RETAIL|OTHER|null>", "confidence": "...", "source": "..."},
-    "vendor_type":          {"value": "<SAAS|SERVICES|HARDWARE|CONSULTING|MARKETPLACE|STAFFING|INFRASTRUCTURE|OTHER|null>", "confidence": "...", "source": "..."},
-    "primary_use_case":     {"value": "<str|null>", "confidence": "...", "source": "..."},
-    "additional_categories":{"value": "<[list]|null>", "confidence": "...", "source": "..."}
+    "description":          {"value": "<str|null>", "confidence": "HIGH|MEDIUM|LOW|INFERRED|CONFLICT|MISSING", "source": "..."},
+    "hq_city":              {"value": "<str|null>", "confidence": "HIGH|MEDIUM|LOW|INFERRED|CONFLICT|MISSING", "source": "..."},
+    "hq_country":           {"value": "<ISO-3166-1-alpha-2|null>", "confidence": "HIGH|MEDIUM|LOW|INFERRED|CONFLICT|MISSING", "source": "..."},
+    "hq_address":           {"value": "<full street address|null>", "confidence": "HIGH|MEDIUM|LOW|INFERRED|CONFLICT|MISSING", "source": "..."},
+    "registered_address":   {"value": "<registered office address|null>", "confidence": "HIGH|MEDIUM|LOW|INFERRED|CONFLICT|MISSING", "source": "..."},
+    "founding_year":        {"value": "<int|null>", "confidence": "HIGH|MEDIUM|LOW|INFERRED|CONFLICT|MISSING", "source": "..."},
+    "incorporation_date":   {"value": "<YYYY-MM-DD|null>", "confidence": "HIGH|MEDIUM|LOW|INFERRED|CONFLICT|MISSING", "source": "..."},
+    "company_status":       {"value": "<PUBLIC|PRIVATE|SUBSIDIARY|NON_PROFIT|UNKNOWN|null>", "confidence": "HIGH|MEDIUM|LOW|INFERRED|CONFLICT|MISSING", "source": "..."},
+    "legal_name":           {"value": "<official registered legal name|null>", "confidence": "HIGH|MEDIUM|LOW|INFERRED|CONFLICT|MISSING", "source": "..."},
+    "lei":                  {"value": "<20-char LEI code|null>", "confidence": "HIGH|MEDIUM|LOW|INFERRED|CONFLICT|MISSING", "source": "..."},
+    "registration_number":  {"value": "<company reg number|null>", "confidence": "HIGH|MEDIUM|LOW|INFERRED|CONFLICT|MISSING", "source": "..."},
+    "jurisdiction":         {"value": "<e.g. US-DE, GB, AU|null>", "confidence": "HIGH|MEDIUM|LOW|INFERRED|CONFLICT|MISSING", "source": "..."},
+    "linkedin_url":         {"value": "<LinkedIn company page URL|null>", "confidence": "HIGH|MEDIUM|LOW|INFERRED|CONFLICT|MISSING", "source": "..."},
+    "employee_count_range": {"value": "<1-10|11-50|51-200|201-500|501-1000|1001-5000|5001-10000|10000+|null>", "confidence": "HIGH|MEDIUM|LOW|INFERRED|CONFLICT|MISSING", "source": "..."},
+    "revenue_range":        {"value": "<<$1M|$1M-$10M|$10M-$50M|$50M-$100M|$100M-$500M|$500M-$1B|$1B-$10B|$10B+|null>", "confidence": "HIGH|MEDIUM|LOW|INFERRED|CONFLICT|MISSING", "source": "..."},
+    "revenue":              {"value": "<reported revenue string e.g. '$41.5B'|null>", "confidence": "HIGH|MEDIUM|LOW|INFERRED|CONFLICT|MISSING", "source": "..."},
+    "company_size_band":    {"value": "<STARTUP|SMB|MID_MARKET|ENTERPRISE|null>", "confidence": "HIGH|MEDIUM|LOW|INFERRED|CONFLICT|MISSING", "source": "..."},
+    "funding_stage":        {"value": "<BOOTSTRAPPED|SEED|SERIES_A|SERIES_B|SERIES_C_PLUS|PE_BACKED|PUBLIC|UNKNOWN|null>", "confidence": "HIGH|MEDIUM|LOW|INFERRED|CONFLICT|MISSING", "source": "..."},
+    "ticker":               {"value": "<str|null>", "confidence": "HIGH|MEDIUM|LOW|INFERRED|CONFLICT|MISSING", "source": "..."},
+    "exchange":             {"value": "<NYSE|NASDAQ|LSE|TSX|ASX|OTHER|null>", "confidence": "HIGH|MEDIUM|LOW|INFERRED|CONFLICT|MISSING", "source": "..."},
+    "category":             {"value": "<IT_SOFTWARE|PROFESSIONAL_SERVICES|FACILITIES|LOGISTICS|MARKETING|FINANCE|HR|OTHER|null>", "confidence": "HIGH|MEDIUM|LOW|INFERRED|CONFLICT|MISSING", "source": "..."},
+    "subcategory":          {"value": "<str|null>", "confidence": "HIGH|MEDIUM|LOW|INFERRED|CONFLICT|MISSING", "source": "..."},
+    "industry":             {"value": "<CROSS_INDUSTRY|FINANCIAL_SERVICES|HEALTHCARE|PUBLIC_SECTOR|RETAIL|OTHER|null>", "confidence": "HIGH|MEDIUM|LOW|INFERRED|CONFLICT|MISSING", "source": "..."},
+    "vendor_type":          {"value": "<SAAS|SERVICES|HARDWARE|CONSULTING|MARKETPLACE|STAFFING|INFRASTRUCTURE|OTHER|null>", "confidence": "HIGH|MEDIUM|LOW|INFERRED|CONFLICT|MISSING", "source": "..."},
+    "primary_use_case":     {"value": "<str|null>", "confidence": "HIGH|MEDIUM|LOW|INFERRED|CONFLICT|MISSING", "source": "..."},
+    "additional_categories":{"value": "<[list]|null>", "confidence": "HIGH|MEDIUM|LOW|INFERRED|CONFLICT|MISSING", "source": "..."}
   },
   "products_and_services": [{"name": "<str>", "type": "<PRODUCT|SERVICE|PLATFORM|MODULE|ADD_ON>", "description": "<str>", "source": "<str>"}],
   "competitors":            [{"name": "<str>", "source": "<str>"}],
@@ -149,7 +157,8 @@ _LIST_KEY_MAP = [
 ]
 
 _OFFICIAL_SOURCES = frozenset({"company_website", "registry", "financial",
-                                "COMPANY_WEBSITE", "REGISTRY", "FINANCIAL"})
+                                "COMPANY_WEBSITE", "REGISTRY", "FINANCIAL",
+                                "contract", "CONTRACT"})
 _SOCIAL_DIR_SOURCES = frozenset({"social", "directory", "linkedin",
                                   "SOCIAL", "DIRECTORY", "LINKEDIN"})
 

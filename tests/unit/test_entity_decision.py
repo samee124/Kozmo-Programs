@@ -292,10 +292,10 @@ def test_confidence_from_brain_hit_when_matched(tmp_workspace):
     assert result.confidence == pytest.approx(0.97)
 
 
-def test_confidence_055_when_not_matched(tmp_workspace):
+def test_confidence_when_not_matched(tmp_workspace):
     plan = make_plan(steps=[])
     result = decide_and_create("IBM", make_profile(), plan, [], "prog-1")
-    assert result.confidence == pytest.approx(0.55)
+    assert result.confidence == pytest.approx(0.82)
 
 
 # ---------------------------------------------------------------------------

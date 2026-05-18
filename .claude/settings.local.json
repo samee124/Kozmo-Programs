@@ -1,0 +1,23 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -m pytest tests/ -x -q)",
+      "Bash(python -m pytest tests/ -q --ignore=tests/unit/test_workspace_builder.py)",
+      "Bash(python -m pytest tests/tools/test_enriched_profile_creator.py::test_workspace_write_happy_path -x -q)",
+      "Bash(python -m pytest tests/integration/test_full_intake.py::TestScenario1CsvOnly::test_workspace_files_created_for_confirmed_vendor -x -q)",
+      "Bash(python -c \"import subprocess; r = subprocess.run\\(['grep', '-n', 'tmp_workspace\\\\|WORKSPACE_ROOT', 'd:/Cobalt/tests/conftest.py'], capture_output=True, text=True\\); print\\(r.stdout\\)\")",
+      "Bash(python -c \"import subprocess; r = subprocess.run\\(['python', '-c', 'from cobalt.core.atomic_write import atomic_write; help\\(atomic_write\\)'], capture_output=True, text=True, cwd='d:/Cobalt'\\); print\\(r.stdout[:1000]\\); print\\(r.stderr[:500]\\)\")",
+      "Bash(python -c \"from cobalt.core.atomic_write import atomic_write; import inspect; print\\(inspect.signature\\(atomic_write\\)\\)\")",
+      "Bash(python -m pytest tests/unit/test_workspace_builder.py -x -q)",
+      "Bash(python -m pytest tests/tools/test_enriched_profile_creator.py -x -q)",
+      "Bash(python -m pytest tests/integration/test_full_intake.py -x -q)",
+      "Bash(python -m pytest tests/ -q)",
+      "Bash(python -m pytest tests/tools/test_enrichment_readiness_check.py -x -q)",
+      "Bash(python -c \"import yaml; d=open\\('workspace/nova-2026/programme_run/vendor_register.md'\\).read\\(\\); parts=d.split\\('---\\\\n',2\\); data=yaml.safe_load\\(parts[1]\\); [print\\(f'{v[\\\\\"vendor_id\\\\\"]:40s} {v.get\\(\\\\\"confidence\\\\\",\\\\\"?\\\\\"\\):.2f}  {v.get\\(\\\\\"resolution_method\\\\\",\\\\\"?\\\\\"\\)}'\\) for v in data.get\\('vendors',[]\\)]\")",
+      "Bash(python -c \"import subprocess; r = subprocess.run\\(['python', '-c', 'from tests.unit.test_entity_decision import *; pass'], capture_output=True, text=True\\); print\\(r.stderr[:200]\\)\")",
+      "Bash(python -m pytest tests/tools/test_external_source_collector.py -q)",
+      "Bash(dir d:\\\\Cobalt /b)",
+      "PowerShell(head -60)"
+    ]
+  }
+}

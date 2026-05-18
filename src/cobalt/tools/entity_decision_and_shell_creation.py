@@ -1,6 +1,7 @@
 """Tool 5 — entity_decision_and_shell_creation: determine outcome and create workspace."""
 
 import logging
+import re
 from dataclasses import dataclass, field
 
 from cobalt.intake.steps import StepResult
@@ -10,6 +11,11 @@ from cobalt.models.schemas.signal_profile_schema import EntityType, ErpSignal, S
 from cobalt.workspace.builder import build_workspace
 
 logger = logging.getLogger(__name__)
+
+_LEGAL_SUFFIX_RE = re.compile(
+    r",?\s*(Corporation|Corp\.?|Incorporated|Inc\.?|Limited|Ltd\.?|LLC|LLP|GmbH|Co\.?)$",
+    re.IGNORECASE,
+)
 
 _INTAKE_STATUS_MAP = {
     "CONFIRMED": IntakeStatus.CONFIRMED,
@@ -114,7 +120,11 @@ def _canonical_name(profile: SignalProfile) -> str | None:
         return profile.brain_hit.canonical
     if profile.dedup_result.status == "AUTO_MERGE" and profile.dedup_result.match_name:
         return profile.dedup_result.match_name
-    return profile.normalized or profile.raw
+    raw = (profile.raw or "").strip()
+    if raw:
+        cleaned = _LEGAL_SUFFIX_RE.sub("", raw).strip().rstrip(".,;: ")
+        return cleaned or raw
+    return profile.normalized
 
 
 def decide_and_create(
@@ -149,7 +159,7 @@ def decide_and_create(
         fraud_signals = _extract_fraud_signals(step_results)
         triage_question = _get_triage_question(step_results)
         block_reason = "FRAUD_DETECTED" if status == "BLOCKED" else None
-        confidence = profile.brain_hit.confidence if profile.brain_hit.matched else 0.55
+        confidence = profile.brain_hit.confidence if profile.brain_hit.matched else 0.82
         fraud_risk_val = plan.fraud_risk.value if hasattr(plan.fraud_risk, "value") else str(plan.fraud_risk)
 
         intake_result = IntakeResult(

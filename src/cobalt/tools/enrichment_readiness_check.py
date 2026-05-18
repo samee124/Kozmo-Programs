@@ -233,6 +233,66 @@ def _read_spend(vendor_path: Path) -> dict[str, Any] | None:
     return _read_markdown_frontmatter(vendor_path / "cost_file" / "spend.md")
 
 
+_CONTRACT_DOC_TYPES: frozenset[str] = frozenset({
+    "MSA", "SOW", "AMENDMENT", "DPA", "FRAMEWORK", "LICENCE",
+})
+_CONTRACT_FILENAME_KEYWORDS: tuple[str, ...] = (
+    "msa", "contract", "agreement", "sow", "dpa", "nda", "framework", "licence",
+)
+_CONTRACT_DIRS: tuple[str, ...] = ("evidence", "contracts", "uploads")
+
+# Fields the DE pipeline extracts from contracts — RS fields are excluded.
+_CONTRACT_DE_FIELDS: frozenset[str] = frozenset({
+    "counterparty_legal_name", "counterparty_registration_number",
+    "counterparty_jurisdiction", "counterparty_registered_address",
+    "counterparty_governing_law", "contract_type",
+})
+
+
+def _read_contract_evidence(vendor_path: Path) -> list[dict]:
+    """Scan vendor workspace for contract evidence usable by DE pipeline.
+
+    Scenario A: reads document_extractions from relationship_spend_profile.md if RS-02
+    has already run.  Scenario B: discovers uploaded PDF/DOCX contract files for
+    later LLM extraction.  Returns [] on any error — never raises.
+    """
+    results: list[dict] = []
+    try:
+        # Scenario A — RS-02 already ran; reuse its extracted entity fields.
+        rsp_path = vendor_path / "relationship" / "relationship_spend_profile.md"
+        if rsp_path.exists():
+            data = _read_markdown_frontmatter(rsp_path) or {}
+            for item in (data.get("document_extractions") or []):
+                if item.get("document_type") in _CONTRACT_DOC_TYPES:
+                    entry: dict[str, Any] = {
+                        "source": "rs_extracted",
+                        "document_type": item.get("document_type"),
+                    }
+                    for field_name in _CONTRACT_DE_FIELDS:
+                        if field_name in item:
+                            entry[field_name] = item[field_name]
+                    results.append(entry)
+
+        # Scenario B — uploaded contract files awaiting extraction.
+        for dir_name in _CONTRACT_DIRS:
+            dir_path = vendor_path / dir_name
+            if not dir_path.is_dir():
+                continue
+            for f in dir_path.iterdir():
+                if f.suffix.lower() not in (".pdf", ".docx"):
+                    continue
+                if not any(kw in f.name.lower() for kw in _CONTRACT_FILENAME_KEYWORDS):
+                    continue
+                results.append({
+                    "source": "uploaded_file",
+                    "file_path": str(f),
+                    "needs_extraction": True,
+                })
+    except Exception as exc:
+        logger.warning("_read_contract_evidence failed for %s: %s", vendor_path, exc)
+    return results
+
+
 # ---------------------------------------------------------------------------
 # Skill 1 — Identity confidence gate
 # ---------------------------------------------------------------------------
@@ -360,6 +420,7 @@ def _source_scope(
     known_facts: KnownFacts,
     entity_data: dict[str, Any],
     coverage_data: dict[str, Any] | None,
+    contract_evidence: list[dict] | None = None,
 ) -> tuple[list[str], int]:
     base_sources, base_count = _TIER_SOURCES.get(depth_tier, (["web_search"], 1))
     source_list: list[str] = list(base_sources)
@@ -376,6 +437,10 @@ def _source_scope(
         for src in ("registry", "news"):
             if src not in source_list:
                 source_list.append(src)
+
+    if contract_evidence:
+        if "contract" not in source_list:
+            source_list.append("contract")
 
     return source_list, query_count
 
@@ -411,6 +476,7 @@ def _build_result(
     known_facts: KnownFacts,
     confidence_floor: float,
     flags: list[str],
+    contract_evidence: list[dict] | None = None,
 ) -> EnrichmentReadinessResult:
     return EnrichmentReadinessResult(
         vendor_id=vendor_id,
@@ -423,6 +489,7 @@ def _build_result(
         known_facts=known_facts,
         confidence_floor=confidence_floor,
         flags=flags,
+        contract_evidence=contract_evidence or [],
     )
 
 
@@ -452,6 +519,7 @@ def check_enrichment_readiness(
     entity_data = _read_entity(vendor_path)
     coverage_data = _read_coverage(vendor_path)
     spend_data = _read_spend(vendor_path)
+    contract_evidence = _read_contract_evidence(vendor_path)
 
     if entity_data is None:
         return _blocked_result(vendor_id, "MISSING_ENTITY_FILE")
@@ -499,10 +567,15 @@ def check_enrichment_readiness(
 
     # Skill 5 — source scope determination
     source_list, query_count = _source_scope(
-        depth_tier, known_facts, entity_data, coverage_data
+        depth_tier, known_facts, entity_data, coverage_data,
+        contract_evidence=contract_evidence,
     )
 
     # Skill 6 — assemble result
+    all_flags = list(gate.flags)
+    if contract_evidence:
+        all_flags.append("CONTRACT_EVIDENCE_FOUND")
+
     return _build_result(
         vendor_id=vendor_id,
         proceed=True,
@@ -513,5 +586,6 @@ def check_enrichment_readiness(
         query_count=query_count,
         known_facts=known_facts,
         confidence_floor=float(entity_data.get("identity_confidence") or entity_data.get("confidence") or 0.0),
-        flags=gate.flags,
+        flags=all_flags,
+        contract_evidence=contract_evidence,
     )

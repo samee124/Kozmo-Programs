@@ -14,6 +14,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+import urllib.error
 import urllib.parse
 import urllib.request
 
@@ -394,6 +395,34 @@ def _collect_web_search(ctx: _SearchContext) -> tuple[list[SourceEvidenceItem], 
     return items, flags
 
 
+def _backfill_website_from_search(ctx: _SearchContext, items: list[SourceEvidenceItem]) -> None:
+    """If no website/domain at intake, infer the official site from web_search results.
+
+    A domain that appears in 2+ OFFICIAL results is almost certainly the vendor's own site
+    (root + at least one subpage), while noise results each come from a different domain.
+    Social-media domains are excluded.
+    """
+    _SOCIAL_DOMAINS = {"instagram.com", "facebook.com", "twitter.com", "x.com",
+                       "linkedin.com", "tiktok.com", "youtube.com", "yelp.com"}
+    seen: dict[str, str] = {}  # base_domain → first full URL
+    for item in items:
+        if item.quality_signal not in ("OFFICIAL",):
+            continue
+        try:
+            parsed = urllib.parse.urlparse(item.source_url)
+            domain = parsed.netloc.removeprefix("www.")
+            if not domain or domain in _SOCIAL_DOMAINS:
+                continue
+            if domain in seen:
+                # Same domain appeared twice → strong signal this is the official site
+                ctx.website = seen[domain]
+                logger.debug("[backfill] ctx.website inferred as %r (appeared 2+ times in web_search)", ctx.website)
+                return
+            seen[domain] = item.source_url
+        except Exception:
+            continue
+
+
 def _collect_company_website(ctx: _SearchContext) -> tuple[list[SourceEvidenceItem], list[str]]:
     items: list[SourceEvidenceItem] = []
     flags: list[str] = []
@@ -756,8 +785,8 @@ def _collect_opensanctions(ctx: _SearchContext) -> tuple[list[SourceEvidenceItem
     try:
         with urllib.request.urlopen(req, timeout=15) as resp:
             data = json.loads(resp.read().decode("utf-8"))
-    except Exception:
-        logger.exception("OpenSanctions search error for %r", ctx.canonical_name)
+    except Exception as exc:
+        logger.warning("OpenSanctions unavailable for %r: %s", ctx.canonical_name, exc)
         return [], ["OPENSANCTIONS_FETCH_ERROR"]
 
     results = data.get("results") or []
@@ -869,8 +898,14 @@ def _collect_wikipedia(ctx: _SearchContext) -> tuple[list[SourceEvidenceItem], l
     try:
         with urllib.request.urlopen(req, timeout=15) as resp:
             data = json.loads(resp.read().decode("utf-8"))
-    except Exception:
-        logger.exception("Wikipedia fetch error for %r", ctx.canonical_name)
+    except urllib.error.HTTPError as exc:
+        if exc.code == 404:
+            logger.debug("No Wikipedia article for %r", ctx.canonical_name)
+        else:
+            logger.warning("Wikipedia HTTP %s for %r", exc.code, ctx.canonical_name)
+        return [], ["WIKIPEDIA_FETCH_ERROR"]
+    except Exception as exc:
+        logger.warning("Wikipedia unavailable for %r: %s", ctx.canonical_name, exc)
         return [], ["WIKIPEDIA_FETCH_ERROR"]
 
     if data.get("type") == "https://mediawiki.org/wiki/HyperSwitch/errors/not_found":
@@ -921,6 +956,130 @@ def _collect_search_discovery(ctx: _SearchContext) -> tuple[list[SourceEvidenceI
         signal_type=_detect_lifecycle_signal(abstract),
     )
     return [item], []
+
+
+_RS_BLOCKED_FIELDS: frozenset[str] = frozenset({
+    "contract_value", "renewal_date", "sla_terms", "auto_renewal", "notice_period",
+})
+
+_CONTRACT_DE_FIELDS: frozenset[str] = frozenset({
+    "counterparty_legal_name", "counterparty_registration_number",
+    "counterparty_jurisdiction", "counterparty_registered_address",
+    "counterparty_governing_law", "contract_type",
+})
+
+
+def _extract_contract_entity_fields(file_path: str, ctx: _SearchContext) -> str | None:
+    """Read contract file bytes, extract text, call LLM for DE entity fields.
+
+    Returns a formatted content string on success, None on any failure.
+    Only extracts DE-relevant entity fields — never RS fields.
+    """
+    from cobalt.core.exceptions import ContractExtractionError
+    try:
+        path = Path(file_path)
+        text: str | None = None
+
+        if path.suffix.lower() == ".pdf":
+            try:
+                from pdfminer.high_level import extract_text as pdfminer_extract
+                text = pdfminer_extract(file_path)
+            except ImportError:
+                pass
+            if not text:
+                try:
+                    from pypdf import PdfReader
+                    reader = PdfReader(file_path)
+                    text = "\n".join(
+                        page.extract_text() or "" for page in reader.pages
+                    )
+                except ImportError:
+                    pass
+        elif path.suffix.lower() == ".docx":
+            try:
+                import docx
+                doc = docx.Document(file_path)
+                text = "\n".join(para.text for para in doc.paragraphs)
+            except ImportError:
+                pass
+
+        if not text or len(text.strip()) < 100:
+            raise ContractExtractionError(
+                f"Text extraction yielded < 100 chars for {file_path}"
+            )
+
+        prompt = (
+            "Extract ONLY these entity identification facts from the contract below.\n"
+            "Return null for any field not explicitly stated. Do not infer. Do not guess.\n"
+            "Return JSON only. No preamble.\n\n"
+            "Fields:\n"
+            "- counterparty_legal_name\n"
+            "- counterparty_registration_number\n"
+            "- counterparty_jurisdiction\n"
+            "- counterparty_registered_address\n"
+            "- counterparty_governing_law\n"
+            "- contract_type (MSA/SOW/DPA/LICENCE/FRAMEWORK/AMENDMENT/UNKNOWN)\n\n"
+            f"Contract text (first 3000 characters):\n{text[:3000]}"
+        )
+
+        from cobalt.core.llm_call import llm_call
+        raw = llm_call(prompt=prompt, system="You are a contract analysis assistant. Return valid JSON only.", expect_json=True)
+        if not isinstance(raw, dict):
+            raise ContractExtractionError("LLM returned non-dict response")
+
+        lines = ["CONTRACT ENTITY FACTS:"]
+        for field_name in _CONTRACT_DE_FIELDS:
+            val = raw.get(field_name)
+            if val:
+                lines.append(f"{field_name}: {val}")
+        return "\n".join(lines)
+
+    except Exception as exc:
+        logger.warning("[contract] extraction failed for %r: %s", file_path, exc)
+        return None
+
+
+def _collect_contract_evidence(
+    ctx: _SearchContext,
+    contract_evidence: list[dict],
+    now_iso: str,
+) -> list[SourceEvidenceItem]:
+    """Build SourceEvidenceItems from pre-detected contract evidence.
+
+    Scenario A (rs_extracted): format existing DE fields as content, no LLM call.
+    Scenario B (uploaded_file + needs_extraction): call LLM for entity fields.
+    RS fields (contract_value, renewal_date, etc.) are never included in content.
+    """
+    items: list[SourceEvidenceItem] = []
+    for entry in contract_evidence:
+        source = entry.get("source")
+        content: str | None = None
+
+        if source == "rs_extracted":
+            lines = ["CONTRACT ENTITY FACTS:"]
+            for field_name in _CONTRACT_DE_FIELDS:
+                val = entry.get(field_name)
+                if val:
+                    lines.append(f"{field_name}: {val}")
+            if len(lines) > 1:
+                content = "\n".join(lines)
+
+        elif source == "uploaded_file" and entry.get("needs_extraction"):
+            content = _extract_contract_entity_fields(entry.get("file_path", ""), ctx)
+
+        if not content:
+            continue
+
+        items.append(SourceEvidenceItem(
+            content=content,
+            source_type="CONTRACT",
+            source_url=entry.get("file_path") or f"workspace://contract/{ctx.vendor_id}",
+            retrieved_at=now_iso,
+            validation_status="CONFIRMED",
+            quality_signal="OFFICIAL",
+            signal_type=None,
+        ))
+    return items
 
 
 _COLLECTORS: dict[str, Any] = {
@@ -984,6 +1143,14 @@ def collect_sources(
         items, flags = collector(ctx)
         sources[source_name] = items
         all_flags.extend(flags)
+        if source_name == "web_search" and not ctx.website and not ctx.domain:
+            _backfill_website_from_search(ctx, items)
+
+    # Contract evidence — collect separately after the main source loop
+    if getattr(readiness, "contract_evidence", None):
+        contract_items = _collect_contract_evidence(ctx, readiness.contract_evidence, _now_iso())
+        if contract_items:
+            sources["contract"] = contract_items
 
     all_items = [item for item_list in sources.values() for item in item_list]
     disambiguation_notices: list[dict] = [

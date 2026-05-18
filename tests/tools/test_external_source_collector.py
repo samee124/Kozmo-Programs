@@ -15,6 +15,7 @@ from cobalt.models.schemas.enrichment_schema import (
 )
 from cobalt.tools.external_source_collector import (
     _SearchContext,
+    _collect_contract_evidence,
     _validate_against_entity,
     collect_sources,
 )
@@ -949,3 +950,137 @@ def test_registry_oc_country_corroboration_selects_de_match(monkeypatch):
     assert len(items) == 1
     content = json.loads(items[0].content)
     assert content["jurisdiction_code"] == "de"
+
+
+# ---------------------------------------------------------------------------
+# Tests 53–57: contract evidence collection
+# ---------------------------------------------------------------------------
+
+def _now_iso() -> str:
+    from datetime import datetime, timezone
+    return datetime.now(timezone.utc).isoformat()
+
+
+def test_collect_contract_evidence_from_rs_extracted():
+    """Test 53: rs_extracted item with DE fields → SourceEvidenceItem with CONTRACT/OFFICIAL."""
+    contract_evidence = [
+        {
+            "source": "rs_extracted",
+            "document_type": "MSA",
+            "counterparty_legal_name": "Acme Holdings Ltd",
+            "counterparty_jurisdiction": "GB",
+            "contract_type": "MSA",
+        }
+    ]
+    ctx = _ctx()
+    items = _collect_contract_evidence(ctx, contract_evidence, _now_iso())
+    assert len(items) == 1
+    assert items[0].source_type == "CONTRACT"
+    assert items[0].quality_signal == "OFFICIAL"
+    assert items[0].validation_status == "CONFIRMED"
+    assert "counterparty_legal_name: Acme Holdings Ltd" in items[0].content
+    assert "counterparty_jurisdiction: GB" in items[0].content
+
+
+def test_collect_contract_evidence_empty_when_no_contracts():
+    """Test 54: Empty contract_evidence → returns []."""
+    ctx = _ctx()
+    items = _collect_contract_evidence(ctx, [], _now_iso())
+    assert items == []
+
+
+def test_collect_contract_evidence_skips_rs_fields():
+    """Test 55: rs_extracted item with RS fields → RS fields absent from content."""
+    contract_evidence = [
+        {
+            "source": "rs_extracted",
+            "document_type": "MSA",
+            "counterparty_legal_name": "Acme Ltd",
+            "contract_value": "500000",       # RS field — must be excluded
+            "renewal_date": "2027-01-01",     # RS field — must be excluded
+            "auto_renewal": True,             # RS field — must be excluded
+            "sla_terms": "99.9% uptime",      # RS field — must be excluded
+            "notice_period": "30 days",       # RS field — must be excluded
+        }
+    ]
+    ctx = _ctx()
+    items = _collect_contract_evidence(ctx, contract_evidence, _now_iso())
+    assert len(items) == 1
+    content = items[0].content
+    assert "counterparty_legal_name: Acme Ltd" in content
+    assert "contract_value" not in content
+    assert "renewal_date" not in content
+    assert "auto_renewal" not in content
+    assert "sla_terms" not in content
+    assert "notice_period" not in content
+
+
+def test_readiness_check_detects_contract_files(tmp_path):
+    """Test 56: vendor workspace with a contract PDF in evidence/ → contract_evidence non-empty
+    and CONTRACT_EVIDENCE_FOUND in flags."""
+    from cobalt.tools.enrichment_readiness_check import check_enrichment_readiness
+
+    # Build a minimal vendor workspace
+    prog = "prog-test"
+    vendor = "test-vendor"
+    vendor_path = tmp_path / prog / vendor
+    vendor_path.mkdir(parents=True)
+
+    # Write a minimal vendor .md file so entity_data loads
+    md_content = (
+        "---\n"
+        "vendor_id: test-vendor\n"
+        "canonical_name: Test Vendor\n"
+        "intake:\n"
+        "  confidence: 0.85\n"
+        "  data_class: CLASS_D\n"
+        "---\n\n# Test Vendor\n"
+    )
+    (vendor_path / "test_vendor.md").write_text(md_content, encoding="utf-8")
+
+    # Create evidence/ dir with a contract PDF
+    evidence_dir = vendor_path / "evidence"
+    evidence_dir.mkdir()
+    (evidence_dir / "msa_acme_2025.pdf").write_bytes(b"%PDF fake")
+
+    result = check_enrichment_readiness(
+        vendor_id=vendor,
+        programme_id=prog,
+        workspace_root=tmp_path,
+    )
+
+    assert len(result.contract_evidence) > 0
+    assert result.contract_evidence[0]["source"] == "uploaded_file"
+    assert "CONTRACT_EVIDENCE_FOUND" in result.flags
+    assert "contract" in result.source_list
+
+
+def test_readiness_check_no_contracts_returns_empty(tmp_path):
+    """Test 57: vendor workspace with no contract files → contract_evidence == []."""
+    from cobalt.tools.enrichment_readiness_check import check_enrichment_readiness
+
+    prog = "prog-test"
+    vendor = "test-vendor-clean"
+    vendor_path = tmp_path / prog / vendor
+    vendor_path.mkdir(parents=True)
+
+    md_content = (
+        "---\n"
+        "vendor_id: test-vendor-clean\n"
+        "canonical_name: Clean Vendor\n"
+        "intake:\n"
+        "  confidence: 0.85\n"
+        "  data_class: CLASS_D\n"
+        "---\n\n# Clean Vendor\n"
+    )
+    (vendor_path / "clean_vendor.md").write_text(md_content, encoding="utf-8")
+
+    result = check_enrichment_readiness(
+        vendor_id=vendor,
+        programme_id=prog,
+        workspace_root=tmp_path,
+    )
+
+    assert result.contract_evidence == []
+    assert "CONTRACT_EVIDENCE_FOUND" not in result.flags
+    assert "contract" not in result.source_list

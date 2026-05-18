@@ -128,6 +128,13 @@ class EnrichmentReadinessReadError(Exception):
     """
 
 
+class ContractExtractionError(Exception):
+    """Raised when contract entity field extraction fails — file unreadable,
+    LLM call failed, or JSON parse error. Caller logs WARNING and continues
+    without contract evidence. Never blocks the enrichment run.
+    """
+
+
 class EnrichedProfileWriteError(Exception):
     """Raised when the atomic write of vendor_profile.md fails.
 

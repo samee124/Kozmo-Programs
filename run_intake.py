@@ -16,13 +16,13 @@ logging.basicConfig(
 from cobalt.orchestrator.intake_orchestrator import run_intake
 from cobalt.orchestrator.enrichment_orchestrator import enrich_all_confirmed
 
-PROGRAMME = "salesforce-2026"
+PROGRAMME = "nova-2026"
 
 # Step 1 — Intake
 intake = run_intake(
     programme_id=PROGRAMME,
-    vendor_list_path=None,
-    documents_path=r"D:\vendor\salesforce",
+    vendor_list_path=r"C:\Users\Samee.a\Downloads\Vendor_list_30 (2).xlsx",
+    documents_path=None,
     own_company=None,
 )
 print(f"Intake done — confirmed={len(intake.confirmed)}  triage={len(intake.triage)}")
