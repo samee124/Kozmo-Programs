@@ -105,6 +105,9 @@ class ResearchAgent:
         if tier == "SKIP":
             return ""
 
+        if not os.getenv("BRAVE_API_KEY"):
+            return ""
+
         cache_dir = os.getenv("SEARCH_CACHE_DIR", _DEFAULT_CACHE_DIR)
         Path(cache_dir).mkdir(parents=True, exist_ok=True)
 
@@ -129,7 +132,6 @@ class ResearchAgent:
             text = (
                 self._brave_search(query, count)
                 or self._firecrawl_search(query, cache_dir)
-                or self._ddg_search(query, cache_dir)
             )
             if text:
                 parts.append(text)

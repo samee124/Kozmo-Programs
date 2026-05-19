@@ -31,7 +31,18 @@ from cobalt.models.schemas.rs_schema import (
     StructuredDataBundle,
 )
 from cobalt.runtime.execution_state import ExecutionState
-from cobalt.runtime.runtime_engine import RuntimeEngine, StepFatal, WorkflowOutcome
+from cobalt.runtime.runtime_engine import (
+    ReplanDecision,
+    RuntimeEngine,
+    StepFatal,
+    WorkflowOutcome,
+)
+from cobalt.runtime.workflow_definition import (
+    RetryPolicy,
+    StepStatus,
+    WorkflowDefinition,
+    WorkflowStep,
+)
 from cobalt.tools import (
     document_intelligence,
     relationship_classifier,
@@ -44,6 +55,35 @@ logger = logging.getLogger(__name__)
 
 # Maximum age (days) before a profile is considered stale and re-run
 PROFILE_MAX_AGE_DAYS = 30
+
+
+# ---------------------------------------------------------------------------
+# Passthrough planner — P3 workflow doesn't use LLM-based replanning
+# ---------------------------------------------------------------------------
+
+class _RSPlanner:
+    """Minimal PlannerProtocol implementation for P3 workflows.
+
+    P3 is a linear pipeline with no conditional branching or replanning.
+    Always returns CONTINUE so the RuntimeEngine runs every step in sequence.
+    """
+
+    def evaluate_step(
+        self,
+        step: WorkflowStep,
+        result: dict,
+        state: ExecutionState,
+    ) -> ReplanDecision:
+        return ReplanDecision(action="CONTINUE", reason="rs_passthrough")
+
+    def replan(
+        self,
+        workflow: WorkflowDefinition,
+        completed_step: WorkflowStep,
+        step_result: dict,
+        accumulated_signals: dict,
+    ) -> list[WorkflowStep]:
+        return []
 
 
 def _now_iso() -> str:
@@ -114,7 +154,8 @@ def _check_gates(
 
     entity_data = _read_md_frontmatter(ep)
     status = (entity_data.get("intake") or {}).get("status") or entity_data.get("status", "")
-    if status.upper() != "CONFIRMED":
+    _REJECTED = {"TRIAGE", "TRIAGE_REQUIRED", "BLOCKED", "REJECTED", "UNRESOLVED"}
+    if not status or status.upper() in _REJECTED:
         return RSRunResult(
             vendor_id=vendor_id,
             programme_id=programme_id,
@@ -333,42 +374,67 @@ def _build_rs_step_registry(
 # Workflow definition
 # ---------------------------------------------------------------------------
 
-def _build_rs_workflow(vendor_id: str, programme_id: str, context: dict) -> dict:
+def _build_rs_workflow(vendor_id: str, programme_id: str, context: dict) -> WorkflowDefinition:
+    """Build and persist a WorkflowDefinition for the P3 pipeline."""
     workflow_id = f"wf-rs-{vendor_id}-{int(time.time())}"
-    return {
-        "workflow_id":    workflow_id,
-        "workflow_type":  "RS_DATA_GATHERING",
-        "vendor_id":      vendor_id,
-        "programme_id":   programme_id,
-        "context":        context,
-        "steps": [
-            {
-                "step_id":   "s1_collect",
-                "step_type": "COLLECT_RS_DATA",
-                "depends_on": [],
-            },
-            {
-                "step_id":   "s2_documents",
-                "step_type": "PROCESS_DOCUMENTS",
-                "depends_on": ["s1_collect"],
-            },
-            {
-                "step_id":   "s3_aggregate",
-                "step_type": "AGGREGATE_SPEND",
-                "depends_on": ["s1_collect", "s2_documents"],
-            },
-            {
-                "step_id":   "s4_classify",
-                "step_type": "CLASSIFY_RELATIONSHIP",
-                "depends_on": ["s3_aggregate"],
-            },
-            {
-                "step_id":   "s5_assemble",
-                "step_type": "ASSEMBLE_RS_PROFILE",
-                "depends_on": ["s1_collect", "s2_documents", "s3_aggregate", "s4_classify"],
-            },
-        ],
-    }
+    steps = [
+        WorkflowStep(
+            step_id="s1_collect",
+            step_type="COLLECT_RS_DATA",
+            status=StepStatus.PENDING,
+            depends_on=[],
+            condition=None,
+            retry_policy=RetryPolicy(),
+            planning_rationale="Collect structured spend data from all configured sources.",
+        ),
+        WorkflowStep(
+            step_id="s2_documents",
+            step_type="PROCESS_DOCUMENTS",
+            status=StepStatus.PENDING,
+            depends_on=["s1_collect"],
+            condition=None,
+            retry_policy=RetryPolicy(),
+            planning_rationale="Extract contract terms from uploaded documents.",
+        ),
+        WorkflowStep(
+            step_id="s3_aggregate",
+            step_type="AGGREGATE_SPEND",
+            status=StepStatus.PENDING,
+            depends_on=["s1_collect", "s2_documents"],
+            condition=None,
+            retry_policy=RetryPolicy(),
+            planning_rationale="Aggregate raw spend records into a spend summary.",
+        ),
+        WorkflowStep(
+            step_id="s4_classify",
+            step_type="CLASSIFY_RELATIONSHIP",
+            status=StepStatus.PENDING,
+            depends_on=["s3_aggregate"],
+            condition=None,
+            retry_policy=RetryPolicy(),
+            planning_rationale="Classify vendor relationship type and dependency tier.",
+        ),
+        WorkflowStep(
+            step_id="s5_assemble",
+            step_type="ASSEMBLE_RS_PROFILE",
+            status=StepStatus.PENDING,
+            depends_on=["s1_collect", "s2_documents", "s3_aggregate", "s4_classify"],
+            condition=None,
+            retry_policy=RetryPolicy(),
+            planning_rationale="Assemble and write the relationship_spend_profile.md.",
+        ),
+    ]
+    return WorkflowDefinition(
+        workflow_id=workflow_id,
+        programme_id=programme_id,
+        vendor_key=None,
+        vendor_id=vendor_id,
+        workflow_type="RS_DATA_GATHERING",
+        created_by="rs_orchestrator",
+        created_at=_now_iso(),
+        context=context,
+        steps=steps,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -454,7 +520,25 @@ def run_rs(
     }
 
     workflow_def = _build_rs_workflow(vendor_id, programme_id, context)
-    workflow_id = workflow_def["workflow_id"]
+    workflow_id = workflow_def.workflow_id
+
+    try:
+        workflow_def.save()
+    except Exception as exc:
+        logger.error("Failed to save RS workflow for %s/%s: %s", programme_id, vendor_id, exc)
+        result = RSRunResult(
+            vendor_id=vendor_id,
+            programme_id=programme_id,
+            status=RSRunStatus.FAILED.value,
+            pcs_before=pcs_before, pcs_after=pcs_before,
+            tools_run=[],
+            flags_raised=["PROFILE_ASSEMBLY_FAILED"],
+            profile_status="FAILED",
+            skip_reason=None,
+            error=f"workflow_save_error: {exc}",
+        )
+        _update_programme_logs(programme_id, vendor_id, result)
+        return result
 
     step_registry = _build_rs_step_registry(
         vendor_id=vendor_id,
@@ -471,8 +555,11 @@ def run_rs(
     )
 
     try:
-        engine = RuntimeEngine(step_registry=step_registry)
-        outcome: WorkflowOutcome = engine.execute_workflow(workflow_def)
+        engine = RuntimeEngine(planner=_RSPlanner(), step_registry=step_registry)
+        outcome: WorkflowOutcome = engine.execute_workflow(
+            workflow_id=workflow_id,
+            programme_id=programme_id,
+        )
     except Exception as exc:
         logger.exception("RuntimeEngine failed for RS %s/%s: %s", programme_id, vendor_id, exc)
         result = RSRunResult(
@@ -491,7 +578,15 @@ def run_rs(
 
     # Assemble result
     profile = run_cache.get("profile")
-    tools_run = list(outcome.completed_steps) if outcome.completed_steps else []
+    # Determine which tools ran from run_cache keys (populated by step adapters)
+    _cache_to_step = {
+        "structured_bundle": "s1_collect",
+        "doc_intelligence":  "s2_documents",
+        "spend_aggregation": "s3_aggregate",
+        "classification":    "s4_classify",
+        "profile":           "s5_assemble",
+    }
+    tools_run = [step for key, step in _cache_to_step.items() if key in run_cache]
 
     if outcome.status == "COMPLETED" and profile is not None:
         result = RSRunResult(
@@ -525,23 +620,47 @@ def run_rs(
     return result
 
 
+def _read_vendor_ids_from_register(programme_id: str) -> list[str]:
+    """Read vendor_ids from vendor_register.md (same source as enrichment)."""
+    from cobalt.core.file_system import programme_run_path, read_md
+    register_path = programme_run_path(programme_id) / "vendor_register.md"
+    if not register_path.exists():
+        return []
+    data = read_md(register_path)
+    if not data:
+        return []
+    vendors = data.get("vendors") or []
+    return [str(v["vendor_id"]) for v in vendors if v.get("vendor_id")]
+
+
 def run_rs_all_confirmed(
     programme_id: str,
     **kwargs,
 ) -> list[RSRunResult]:
     """Run Process 3 for every CONFIRMED vendor in the programme.
 
-    Sequential. Failures in one vendor do not affect others.
+    Reads from vendor_register.md (same source as enrichment orchestrator).
+    Falls back to DB query if register is missing. Sequential — failures in
+    one vendor do not affect others.
     """
-    try:
-        from cobalt.db.queries import get_confirmed_vendors
-        vendor_ids = get_confirmed_vendors(programme_id)
-    except Exception as exc:
-        logger.warning("Could not query confirmed vendors for %s: %s", programme_id, exc)
-        vendor_ids = []
+    vendor_ids = _read_vendor_ids_from_register(programme_id)
+    if not vendor_ids:
+        logger.warning("vendor_register.md empty or missing for %s — falling back to DB", programme_id)
+        try:
+            from cobalt.db.queries import get_confirmed_vendors
+            vendor_ids = get_confirmed_vendors(programme_id)
+        except Exception as exc:
+            logger.warning("Could not query confirmed vendors for %s: %s", programme_id, exc)
+            vendor_ids = []
 
+    if not vendor_ids:
+        logger.warning("No vendors found for RS pipeline — programme %s", programme_id)
+        return []
+
+    logger.info("RS pipeline: processing %d vendors for programme %s", len(vendor_ids), programme_id)
     results: list[RSRunResult] = []
-    for vendor_id in vendor_ids:
+    for idx, vendor_id in enumerate(vendor_ids, start=1):
+        logger.info("[%d/%d] RS processing %s ...", idx, len(vendor_ids), vendor_id)
         result = run_rs(vendor_id, programme_id, **kwargs)
         results.append(result)
 

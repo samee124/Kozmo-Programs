@@ -540,13 +540,16 @@ def get_pending_triage(user_id: str, programme_id: str | None = None) -> list[di
 
 
 def get_confirmed_vendors(programme_id: str) -> list[str]:
-    """Return list of VendorIds with Status='CONFIRMED' for a programme."""
+    """Return all vendor_ids for a programme (intake-confirmed = present in DB)."""
+    factory = _get_session_factory()
+    if factory is None:
+        logger.warning("get_confirmed_vendors: DATABASE_URL not set — returning []")
+        return []
     try:
-        with _get_session() as session:
+        with factory() as session:
             rows = session.execute(
                 select(VendorIntelligence.vendor_id).where(
                     VendorIntelligence.programme_id == programme_id,
-                    VendorIntelligence.status == "CONFIRMED",
                 )
             ).fetchall()
             return [r.vendor_id for r in rows]
