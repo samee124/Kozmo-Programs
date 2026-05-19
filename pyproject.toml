@@ -13,8 +13,8 @@ dependencies = [
     "pydantic>=2.0",
     "openai",
     "sqlalchemy>=2.0",
-    "asyncpg",
-    "psycopg2-binary",
+    "pyodbc",                    # MSSQL / SQL Server ODBC driver
+    "azure-storage-blob>=12.0",  # Azure Blob Storage
     "python-dotenv",
     "tenacity",
     "firecrawl-py",
@@ -22,8 +22,11 @@ dependencies = [
     "pyyaml",
     "pypdf",
     "openpyxl",
+    "jellyfish",
     "pytest",
     "pytest-asyncio",
+    # PostgreSQL kept for local dev fallback; remove when fully migrated to MSSQL
+    "psycopg2-binary",
 ]
 
 [tool.pytest.ini_options]

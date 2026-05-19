@@ -25,6 +25,13 @@ These names match the design spreadsheet exactly. Never rename them.
   Tool 4: external_validation             → src/cobalt/tools/external_validation.py
   Tool 5: entity_decision_and_shell_creation → src/cobalt/tools/entity_decision_and_shell_creation.py
 
+## The Five Process 3 Tools — Names Are Fixed
+  Tool 1 P3: structured_data_collector    → src/cobalt/tools/structured_data_collector.py
+  Tool 2 P3: document_intelligence        → src/cobalt/tools/document_intelligence.py
+  Tool 3 P3: spend_aggregator             → src/cobalt/tools/spend_aggregator.py
+  Tool 4 P3: relationship_classifier      → src/cobalt/tools/relationship_classifier.py
+  Tool 5 P3: rs_profile_assembler         → src/cobalt/tools/rs_profile_assembler.py
+
 ## Directory Structure
 src/cobalt/
   core/           exceptions, llm_call, atomic_write, file_system
@@ -94,7 +101,9 @@ STATE → ANALYZE → PLAN → EXECUTE → NEW STATE → REPEAT
 |------------------------------------|------------------------------------------------------|
 | Core infrastructure                | specs/08_api_contracts/llm_call_spec.md              |
 |                                    | specs/08_api_contracts/atomic_write_spec.md          |
-| DB models                          | specs/02_database/db_schema.md                       |
+| DB models (PostgreSQL dev ref)     | specs/02_database/db_schema.md                       |
+| DB models (SQL Server production)  | specs/02_database/mssql_schema_spec.md               |
+| Azure Blob storage layout          | specs/01_file_structure/azure_blob_spec.md           |
 | Tool 1: source_intake              | specs/06_sparse_data/source_processor_spec.md        |
 | Tool 2: candidate_screening        | specs/06_sparse_data/normalization_spec.md           |
 | Tool 3: entity_resolution          | specs/06_sparse_data/signal_profile_spec.md          |
@@ -108,6 +117,14 @@ STATE → ANALYZE → PLAN → EXECUTE → NEW STATE → REPEAT
 | Program Orchestrator               | specs/03_agents/agent_orchestrator.md                |
 | Plan writer                        | specs/09_invocation/plan_writer_spec.md              |
 | Intake pipeline                    | specs/06_sparse_data/intake_pipeline_spec.md         |
+| P3 schemas                         | specs/07_rs_tools/rs_schemas_spec.md                 |
+| P3 shared utilities                | specs/07_rs_tools/rs_shared_utilities_spec.md        |
+| Tool 1 P3: structured_data_collector | specs/07_rs_tools/structured_data_collector_spec.md |
+| Tool 2 P3: document_intelligence   | specs/07_rs_tools/document_intelligence_spec.md      |
+| Tool 3 P3: spend_aggregator        | specs/07_rs_tools/spend_aggregator_spec.md           |
+| Tool 4 P3: relationship_classifier | specs/07_rs_tools/relationship_classifier_spec.md    |
+| Tool 5 P3: rs_profile_assembler    | specs/07_rs_tools/rs_profile_assembler_spec.md       |
+| P3 pipeline orchestrator           | specs/07_rs_tools/rs_pipeline_spec.md                |
 
 ## Ten Non-Negotiable Rules
 1. VW Agent is the ONLY writer to vendor workspace files after intake.

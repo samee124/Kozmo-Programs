@@ -24,6 +24,7 @@ from cobalt.core.companies_house import (
 )
 from cobalt.core.exceptions import SecEdgarError
 from cobalt.core.gleif import gleif_search_by_name
+from cobalt.core.name_matching import normalise_for_match
 from cobalt.core.search import brave_search, classify_url_quality, fetch_url
 from cobalt.core.sec_edgar import sec_get_company_submissions, sec_search_by_name
 from cobalt.core.opencorporates import opencorporates_search
@@ -102,17 +103,6 @@ def _detect_lifecycle_signal(content: str) -> str | None:
 # Registry helpers
 # ---------------------------------------------------------------------------
 
-def _strip_suffixes(name: str) -> str:
-    suffixes = (" limited", " ltd", " ltd.", " plc", " plc.",
-                " llp", " llp.", " uk limited", " holdings")
-    n = name
-    for s in suffixes:
-        if n.endswith(s):
-            n = n[: -len(s)]
-            break
-    return n.strip()
-
-
 def _pick_best_ch_match(results: list[dict], canonical_name: str) -> dict | None:
     if not results:
         return None
@@ -125,8 +115,8 @@ def _pick_best_ch_match(results: list[dict], canonical_name: str) -> dict | None
         elif target in title or title in target:
             base = 0.7
         else:
-            a = set(_strip_suffixes(target).split())
-            b = set(_strip_suffixes(title).split())
+            a = set(normalise_for_match(target).split())
+            b = set(normalise_for_match(title).split())
             if a and b:
                 base = len(a & b) / len(a | b)
             else:
@@ -143,13 +133,13 @@ def _pick_best_ch_match(results: list[dict], canonical_name: str) -> dict | None
 
 def _count_close_matches(results: list[dict], canonical_name: str, threshold: float = 0.6) -> int:
     target = canonical_name.lower().strip()
-    target_tokens = set(_strip_suffixes(target).split())
+    target_tokens = set(normalise_for_match(target).split())
     if not target_tokens:
         return 0
     count = 0
     for r in results:
         title = r.get("title", "").lower().strip()
-        title_tokens = set(_strip_suffixes(title).split())
+        title_tokens = set(normalise_for_match(title).split())
         if not title_tokens:
             continue
         sim = len(target_tokens & title_tokens) / len(target_tokens | title_tokens)
@@ -171,37 +161,6 @@ def _validate_registry_match(record: dict, ctx: _SearchContext) -> str:
 # ---------------------------------------------------------------------------
 # OpenCorporates helpers
 # ---------------------------------------------------------------------------
-
-_CORPORATE_SUFFIXES: tuple[str, ...] = (
-    # UK / English
-    " limited", " ltd", " ltd.", " plc", " plc.", " llp", " llp.",
-    " uk limited", " holdings", " group",
-    " inc", " inc.", " corp", " corporation", " incorporated",
-    " llc", " lp", " l.p.",
-    # German
-    " gmbh", " ag", " kg", " ohg", " gbr", " kgaa",
-    # French / Iberian / Italian
-    " sarl", " sas", " sci", " sl", " srl", " spa",
-    # Benelux / Nordic
-    " bv", " nv", " ab", " as", " asa", " oy",
-    # APAC
-    " pty", " pty ltd", " pty limited", " pte", " pte ltd",
-    # Generic
-    " co", " co.",
-)
-
-
-def _strip_corporate_suffixes(name: str) -> str:
-    n = name.lower().strip()
-    changed = True
-    while changed:
-        changed = False
-        for s in _CORPORATE_SUFFIXES:
-            if n.endswith(s):
-                n = n[: -len(s)].strip()
-                changed = True
-                break
-    return n.strip()
 
 
 _COUNTRY_CODE_TO_NAMES: dict[str, list[str]] = {
@@ -247,8 +206,8 @@ def _pick_best_oc_match(
         elif target in name or name in target:
             base = 0.7
         else:
-            a = set(_strip_corporate_suffixes(target).split())
-            b = set(_strip_corporate_suffixes(name).split())
+            a = set(normalise_for_match(target).split())
+            b = set(normalise_for_match(name).split())
             base = len(a & b) / len(a | b) if (a and b) else 0.0
 
         status = (r.get("current_status") or "").lower()
@@ -276,13 +235,13 @@ def _count_close_oc_matches(
     results: list[dict], canonical_name: str, threshold: float = 0.6
 ) -> int:
     target = canonical_name.lower().strip()
-    target_tokens = set(_strip_corporate_suffixes(target).split())
+    target_tokens = set(normalise_for_match(target).split())
     if not target_tokens:
         return 0
     count = 0
     for r in results:
         name = (r.get("name") or "").lower()
-        tokens = set(_strip_corporate_suffixes(name).split())
+        tokens = set(normalise_for_match(name).split())
         if not tokens:
             continue
         sim = len(target_tokens & tokens) / len(target_tokens | tokens)
@@ -296,8 +255,8 @@ def _validate_oc_match(record: dict, ctx: _SearchContext) -> str:
     name = (record.get("name") or "").lower().strip()
     if name == target:
         return "CONFIRMED"
-    target_simple = _strip_corporate_suffixes(target)
-    name_simple = _strip_corporate_suffixes(name)
+    target_simple = normalise_for_match(target)
+    name_simple = normalise_for_match(name)
     if target_simple == name_simple:
         return "CONFIRMED"
     if target_simple in name_simple or name_simple in target_simple:
@@ -635,8 +594,8 @@ def _pick_best_wikidata_match(
         elif target in label or label in target:
             base = 0.7
         else:
-            a = set(_strip_suffixes(target).split())
-            b = set(_strip_suffixes(label).split())
+            a = set(normalise_for_match(target).split())
+            b = set(normalise_for_match(label).split())
             base = len(a & b) / len(a | b) if (a and b) else 0.0
         country_bonus = 0.1 if country_hint_lower and country_hint_lower in desc else 0.0
         company_bonus = 0.1 if any(
@@ -656,13 +615,13 @@ def _count_close_wikidata_matches(
     matches: list[dict], canonical_name: str, threshold: float = 0.6
 ) -> int:
     target = canonical_name.lower().strip()
-    target_tokens = set(_strip_suffixes(target).split())
+    target_tokens = set(normalise_for_match(target).split())
     if not target_tokens:
         return 0
     count = 0
     for m in matches:
         label = (m.get("label") or "").lower().strip()
-        label_tokens = set(_strip_suffixes(label).split())
+        label_tokens = set(normalise_for_match(label).split())
         if not label_tokens:
             continue
         sim = len(target_tokens & label_tokens) / len(target_tokens | label_tokens)

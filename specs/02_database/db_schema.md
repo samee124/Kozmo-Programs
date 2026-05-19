@@ -1,5 +1,10 @@
 # Database Schema
 
+> **IMPORTANT — PostgreSQL Reference Only**
+> This file documents the V1 development schema using PostgreSQL. It contains known gaps and is **not the production target**.
+> **Production target is SQL Server (MSSQL).** For the authoritative production schema with full DDL, correct types, all tables, column purpose documentation, and migration scripts, see:
+> `specs/02_database/mssql_schema_spec.md`
+
 ## Overview
 
 PostgreSQL via SQLAlchemy 2.0. Schema is scheduling-focused — the source of truth lives in workspace .md files. The DB caches structured columns from .md files via `sync_to_db()` to enable fast queries.

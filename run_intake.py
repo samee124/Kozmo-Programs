@@ -15,21 +15,35 @@ logging.basicConfig(
 
 from cobalt.orchestrator.intake_orchestrator import run_intake
 from cobalt.orchestrator.enrichment_orchestrator import enrich_all_confirmed
+from cobalt.db.queries import insert_user, insert_programme
 
 PROGRAMME = "nova-2026"
+USER_ID   = os.getenv("COBALT_USER_ID", "user001")
+
+# ── DB bootstrap (idempotent — safe to re-run) ────────────────────────────────
+insert_user(
+    user_id=USER_ID,
+    user_name="Kozmo Admin",
+    email="admin@kozmoprograms.com",
+    subscription_tier="PROFESSIONAL",
+)
+insert_programme(
+    programme_id=PROGRAMME,
+    user_id=USER_ID,
+    programme_name="Nova 2026 Vendor Programme",
+)
 
 # Step 1 — Intake
 intake = run_intake(
-    programme_id=PROGRAMME,
-    vendor_list_path=r"C:\Users\Samee.a\Downloads\Vendor_list_30 (2).xlsx",
-    documents_path=None,
+    programme_id="Sales-01",
+    documents_path="C:\\Users\\Admin\\Downloads\\sales-force-program",
     own_company=None,
 )
 print(f"Intake done — confirmed={len(intake.confirmed)}  triage={len(intake.triage)}")
 
 # Step 2 — Enrichment (only runs on CONFIRMED vendors)
 results = enrich_all_confirmed(
-    programme_id=PROGRAMME,
+    programme_id="Sales-01",
     max_vendors=30,
 )
 for r in results:
