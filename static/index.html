@@ -239,9 +239,10 @@ input[type=text]:focus { border-color: var(--accent); }
         <div class="card-title">Pipeline Configuration</div>
 
         <div class="fg">
-          <label>Programme ID <span class="req">*</span></label>
-          <input type="text" id="prog-id" placeholder="e.g. sales-q3-2026" autocomplete="off">
+          <label>Programme Name <span class="req">*</span></label>
+          <input type="text" id="prog-id" placeholder="e.g. Sales Q3 2026" autocomplete="off">
           <div id="prog-badge"></div>
+          <div id="prog-slug" style="font-size:11px;color:#8A8880;margin-top:3px;min-height:14px;"></div>
         </div>
 
         <div class="fg">
@@ -346,9 +347,20 @@ async function loadRecent() {
 
 function selProg(id) {
   document.getElementById('prog-id').value = id;
+  document.getElementById('prog-slug').textContent = 'ID: ' + id;
   checkProg(id);
   document.querySelectorAll('.prog-item').forEach(e =>
     e.classList.toggle('active', e.dataset.id === id));
+}
+
+// ── Slug helper ────────────────────────────────────────────────────
+function slugify(text) {
+  return text.toLowerCase().trim()
+    .replace(/[^\w\s-]/g, '')
+    .replace(/[\s_]+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .substring(0, 50) || 'programme';
 }
 
 // ── Programme check ────────────────────────────────────────────────
@@ -357,13 +369,16 @@ document.getElementById('prog-id').addEventListener('input', function() {
   clearTimeout(_dt);
   const v = this.value.trim();
   document.getElementById('prog-badge').innerHTML = '';
+  document.getElementById('prog-slug').textContent = '';
   if (!v) return;
-  _dt = setTimeout(() => checkProg(v), 350);
+  const slug = slugify(v);
+  document.getElementById('prog-slug').textContent = 'ID: ' + slug;
+  _dt = setTimeout(() => checkProg(slug), 350);
 });
 
-async function checkProg(id) {
+async function checkProg(slug) {
   try {
-    const d = await fetch('/api/check-programme?id=' + encodeURIComponent(id)).then(r=>r.json());
+    const d = await fetch('/api/check-programme?id=' + encodeURIComponent(slug)).then(r=>r.json());
     document.getElementById('prog-badge').innerHTML = d.exists
       ? '<span class="pb existing">✓ Existing programme — will resume</span>'
       : '<span class="pb new">+ New programme — will be created</span>';
@@ -413,7 +428,7 @@ document.getElementById('run-btn').addEventListener('click', async () => {
   try {
     const d = await fetch('/api/run', { method:'POST', body:fd }).then(r=>r.json());
     if (d.error) { alert('Error: ' + d.error); setBtn(true,'▶ Start Pipeline'); return; }
-    openRun(d.run_id, progId);
+    openRun(d.run_id, d.programme_name || progId, d.programme_id || slugify(progId));
   } catch(e) { alert('Server error: '+e.message); setBtn(true,'▶ Start Pipeline'); }
 });
 
@@ -426,7 +441,7 @@ document.getElementById('back-btn').addEventListener('click', () => {
 });
 
 // ── Pipeline view ──────────────────────────────────────────────────
-function openRun(runId, progId) {
+function openRun(runId, progName, progSlug) {
   document.getElementById('form-section').style.display = 'none';
   document.getElementById('pipeline-section').style.display = '';
 
@@ -441,7 +456,7 @@ function openRun(runId, progId) {
   document.getElementById('con-dot').className  = 'dot live';
   document.getElementById('console').innerHTML  = '';
 
-  sysRow('Programme: ' + progId, true);
+  sysRow('Programme: ' + progName + '  [' + progSlug + ']', true);
 
   const es = new EventSource('/api/run/'+runId+'/stream');
 

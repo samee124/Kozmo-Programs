@@ -153,15 +153,59 @@ def _sync_programme_plan(session: Session, data: dict, vendor_id: str) -> None:
 
 
 def _sync_vendor_register(session: Session, data: dict, vendor_id: str) -> None:
-    """vendor_register.md written → update ProgrammeRun.TotalVendors count."""
+    """vendor_register.md written → update ProgrammeRun confirmed count.
+
+    vendor_register.md only contains confirmed vendors (the vendors list).
+    Derive confirmed count from len(vendors).
+    """
     programme_id = data.get("programme_id")
-    total = data.get("total_vendors")
-    if not programme_id or total is None:
+    if not programme_id:
+        return
+    vendors = data.get("vendors") or []
+    session.execute(
+        update(ProgrammeRun)
+        .where(ProgrammeRun.programme_id == programme_id)
+        .values(confirmed=len(vendors))
+    )
+
+
+def _sync_deduplication_report(session: Session, data: dict, vendor_id: str) -> None:
+    """deduplication_report.md written → update all ProgrammeRun counters.
+
+    This file has total_input, confirmed, triage, discarded, blocked.
+    """
+    programme_id = data.get("programme_id")
+    if not programme_id:
+        return
+    values: dict = {}
+    if data.get("total_input") is not None:
+        values["total_vendors"] = int(data["total_input"])
+    if data.get("confirmed") is not None:
+        values["confirmed"] = int(data["confirmed"])
+    if data.get("triage") is not None:
+        values["triage"] = int(data["triage"])
+    if data.get("discarded") is not None:
+        values["discarded"] = int(data["discarded"])
+    if data.get("blocked") is not None:
+        values["blocked"] = int(data["blocked"])
+    if values:
+        session.execute(
+            update(ProgrammeRun)
+            .where(ProgrammeRun.programme_id == programme_id)
+            .values(**values)
+        )
+
+
+def _sync_run_log(session: Session, data: dict, vendor_id: str) -> None:
+    """run_log.md written → update ProgrammeRun.Status to reflect intake outcome."""
+    programme_id = data.get("programme_id")
+    status = data.get("status")
+    if not programme_id or not status:
         return
     session.execute(
         update(ProgrammeRun)
         .where(ProgrammeRun.programme_id == programme_id)
-        .values(total_vendors=int(total))
+        .values(status=status)
     )
 
 
@@ -247,6 +291,8 @@ _HANDLERS = {
     "relationship_spend_profile.md":    _sync_rs_profile,
     "programme_plan.md":                _sync_programme_plan,
     "vendor_register.md":               _sync_vendor_register,
+    "deduplication_report.md":          _sync_deduplication_report,
+    "run_log.md":                       _sync_run_log,
     "triage_queue.md":                  _sync_triage_queue,
     "analysis_result.md":               _sync_analysis_result,
 }

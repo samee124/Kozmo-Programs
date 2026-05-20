@@ -1,17 +1,8 @@
-"""Cobalt Pipeline Web UI Server.
-
-Serves the browser UI and streams real-time pipeline logs via SSE.
-
-Usage:
-    pip install flask
-    python run_server.py
-    Open http://localhost:5050
-"""
-
 import json
 import logging
 import os
 import queue
+import re
 import sys
 import tempfile
 import threading
@@ -33,6 +24,18 @@ app = Flask(__name__, static_folder="static")
 
 # Active run registry:  run_id -> {"queue": Queue, "status": str}
 _runs: dict = {}
+
+
+def _slugify(text: str) -> str:
+    """Convert a free-form programme name into a filesystem-safe slug.
+
+    e.g. "New Vendor clean up" -> "new-vendor-clean-up"
+    """
+    text = text.lower().strip()
+    text = re.sub(r"[^\w\s-]", "", text)
+    text = re.sub(r"[\s_]+", "-", text)
+    text = re.sub(r"-+", "-", text).strip("-")
+    return text[:50] or "programme"
 
 # ── Logger → (label, entry_type) mapping ──────────────────────────────────────
 _LABELS: dict[str, tuple[str, str]] = {
@@ -141,7 +144,9 @@ def _list_programmes() -> list[dict]:
 def _pipeline_thread(
     run_id: str,
     programme_id: str,
+    programme_name: str,
     vendor_list_path: str,
+    vendor_filename: str,
     docs_path: str | None,
     own_company: str,
     user_id: str,
@@ -167,7 +172,8 @@ def _pipeline_thread(
         insert_programme(
             programme_id=programme_id,
             user_id=user_id,
-            programme_name=programme_id,
+            programme_name=programme_name,
+            input_file=vendor_filename,
         )
 
         # Step 1 — Intake
@@ -234,9 +240,10 @@ def api_check_programme():
 
 @app.route("/api/run", methods=["POST"])
 def api_run():
-    programme_id = request.form.get("programme_id", "").strip()
-    own_company  = request.form.get("own_company", "My Company").strip()
-    user_id      = os.getenv("COBALT_USER_ID", "user001")
+    programme_name = request.form.get("programme_id", "").strip()  # user-entered name
+    programme_id   = _slugify(programme_name)                       # filesystem-safe slug
+    own_company    = request.form.get("own_company", "My Company").strip()
+    user_id        = os.getenv("COBALT_USER_ID", "user001")
 
     if not programme_id:
         return jsonify({"error": "programme_id is required"}), 400
@@ -269,14 +276,15 @@ def api_run():
 
     def _run():
         try:
-            _pipeline_thread(run_id, programme_id, vendor_path, docs_path,
-                             own_company, user_id, q)
+            _pipeline_thread(run_id, programme_id, programme_name,
+                             vendor_path, vf.filename or "",
+                             docs_path, own_company, user_id, q)
         finally:
             cobalt_log.removeHandler(handler)
             _runs[run_id]["status"] = "done"
 
     threading.Thread(target=_run, daemon=True).start()
-    return jsonify({"run_id": run_id})
+    return jsonify({"run_id": run_id, "programme_id": programme_id, "programme_name": programme_name})
 
 
 @app.route("/api/run/<run_id>/stream")
