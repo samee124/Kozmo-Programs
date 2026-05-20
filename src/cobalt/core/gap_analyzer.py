@@ -9,8 +9,12 @@ This module imports GapReport from rs_schema.
 
 from __future__ import annotations
 
+import logging
+
 from cobalt.core.staleness import days_since
 from cobalt.models.schemas.rs_schema import GapReport
+
+logger = logging.getLogger(__name__)
 
 
 # Recommended actions keyed by field name or condition
@@ -98,6 +102,10 @@ def analyse_gaps(
             actions.append(action)
             seen.add(action)
 
+    logger.info(
+        "analyse_gaps: severity=%s  missing=%s  low_conf=%s  stale=%s",
+        gap_severity, missing_fields, low_confidence_fields, stale_fields,
+    )
     return GapReport(
         missing_fields=missing_fields,
         low_confidence_fields=low_confidence_fields,

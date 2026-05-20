@@ -860,6 +860,19 @@ def run_analysis(
     return result
 
 
+def _read_vendor_ids_from_register(programme_id: str) -> list[str]:
+    """Read vendor IDs from vendor_register.md (filesystem, same as RS/enrichment orchestrators)."""
+    from cobalt.core.file_system import programme_run_path, read_md
+    register_path = programme_run_path(programme_id) / "vendor_register.md"
+    if not register_path.exists():
+        return []
+    data = read_md(register_path)
+    if not data:
+        return []
+    vendors = data.get("vendors") or []
+    return [str(v["vendor_id"]) for v in vendors if v.get("vendor_id")]
+
+
 def run_analysis_all_confirmed(
     programme_id: str,
     **kwargs,
@@ -867,16 +880,22 @@ def run_analysis_all_confirmed(
     """Run Process 4 for every CONFIRMED vendor in the programme.
 
     Sequential. A failure on one vendor does not affect others.
+    Reads vendor IDs from vendor_register.md; falls back to DB if empty.
     """
-    try:
-        from cobalt.db.queries import get_confirmed_vendors
-        vendor_ids = get_confirmed_vendors(programme_id)
-    except Exception as exc:
-        logger.warning("Could not query confirmed vendors for %s: %s", programme_id, exc)
-        vendor_ids = []
+    vendor_ids = _read_vendor_ids_from_register(programme_id)
+    if not vendor_ids:
+        try:
+            from cobalt.db.queries import get_confirmed_vendors
+            vendor_ids = get_confirmed_vendors(programme_id)
+        except Exception as exc:
+            logger.warning("Could not query confirmed vendors for %s: %s", programme_id, exc)
+            vendor_ids = []
+
+    logger.info("Analysis pipeline: processing %d vendors for programme %s", len(vendor_ids), programme_id)
 
     results: list[ANRunResult] = []
-    for vendor_id in vendor_ids:
+    for idx, vendor_id in enumerate(vendor_ids, start=1):
+        logger.info("[%d/%d] Analysis processing %s ...", idx, len(vendor_ids), vendor_id)
         result = run_analysis(vendor_id, programme_id, **kwargs)
         results.append(result)
 

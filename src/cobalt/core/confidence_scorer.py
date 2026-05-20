@@ -8,8 +8,10 @@ Confidence values are plain string literals: HIGH / MEDIUM / LOW / MISSING
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
+logger = logging.getLogger(__name__)
 
 # Precedence order (worst → best) for aggregate_confidence
 _PRECEDENCE: list[str] = ["MISSING", "LOW", "INFERRED", "MEDIUM", "HIGH"]
@@ -75,4 +77,6 @@ def aggregate_confidence(levels: list[str]) -> str:
         if idx < worst_idx:
             worst_idx = idx
 
-    return _PRECEDENCE[worst_idx]
+    result = _PRECEDENCE[worst_idx]
+    logger.info("aggregate_confidence: %s -> %s", levels, result)
+    return result

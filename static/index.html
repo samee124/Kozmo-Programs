@@ -2,206 +2,141 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Cobalt — Vendor Intelligence</title>
 <style>
-/* ── Variables ────────────────────────────────────────────────────── */
 :root {
-  --bg:       #F5F4F0;
-  --sidebar:  #EDECE8;
-  --card:     #FFFFFF;
-  --border:   #DEDAD4;
-  --text:     #242420;
-  --muted:    #8A8880;
-  --accent:   #3268C0;
-  --success:  #2C7A48;
-  --warn:     #B07820;
-  --error:    #B03030;
-  --radius:   6px;
+  --bg:        #F5F4F0;
+  --sidebar:   #EDECE8;
+  --card:      #FFFFFF;
+  --border:    #DEDAD4;
+  --text:      #232320;
+  --muted:     #8A8880;
+  --accent:    #3268C0;
+  --success:   #2C7A48;
+  --warn:      #B07820;
+  --error:     #B03030;
+  --radius:    6px;
+
+  /* Console palette */
+  --con-bg:     #0D0D0B;
+  --con-border: #242420;
+  --c-ts:       #484844;
+  --c-orch:     #7A7A70;   /* orchestrator label */
+  --c-agent:    #6AACDC;   /* agent label */
+  --c-tool:     #4ABAEE;   /* tool label — cyan */
+  --c-skill:    #A890E0;   /* skill label — lavender */
+  --c-ws:       #607060;   /* workspace label */
+  --c-white:    #E2E0D8;   /* default message */
+  --c-green:    #3ECB72;   /* done / success */
+  --c-cyan:     #4ABAEE;   /* running */
+  --c-lavender: #C0AAFF;   /* skill message */
+  --c-amber:    #D4A840;   /* warning */
+  --c-red:      #E05050;   /* error */
+  --c-sys:      #383830;   /* system separators */
 }
 
-/* ── Reset ────────────────────────────────────────────────────────── */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 body {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-  font-size: 14px;
-  color: var(--text);
-  background: var(--bg);
-  height: 100vh;
-  overflow: hidden;
+  font-size: 14px; color: var(--text); background: var(--bg);
+  height: 100vh; overflow: hidden;
 }
 
-/* ── App shell ───────────────────────────────────────────────────── */
-.app  { display: flex; height: 100vh; }
+/* ── Layout ────────────────────────────────────────────────── */
+.app     { display: flex; height: 100vh; }
+.sidebar { width: 225px; min-width: 225px; background: var(--sidebar);
+           border-right: 1px solid var(--border);
+           display: flex; flex-direction: column; overflow-y: auto; }
+.main    { flex: 1; overflow-y: auto; padding: 22px 26px; }
 
-/* ── Sidebar ─────────────────────────────────────────────────────── */
-.sidebar {
-  width: 230px;
-  min-width: 230px;
-  background: var(--sidebar);
-  border-right: 1px solid var(--border);
-  display: flex;
-  flex-direction: column;
-  overflow-y: auto;
-}
-.brand { padding: 18px 16px 14px; border-bottom: 1px solid var(--border); }
-.brand h1 { font-size: 17px; font-weight: 700; letter-spacing: .2px; }
+/* ── Sidebar ───────────────────────────────────────────────── */
+.brand   { padding: 16px 15px 12px; border-bottom: 1px solid var(--border); }
+.brand h1 { font-size: 16px; font-weight: 700; }
 .brand p  { font-size: 11px; color: var(--muted); margin-top: 2px; }
+.sb-hdr  { padding: 13px 15px 5px; font-size: 10px; font-weight: 700;
+           text-transform: uppercase; letter-spacing: 1px; color: var(--muted); }
+.prog-item { padding: 9px 15px; cursor: pointer;
+             border-left: 3px solid transparent; transition: background .12s; }
+.prog-item:hover   { background: rgba(0,0,0,.04); }
+.prog-item.active  { border-left-color: var(--accent); background: rgba(50,104,192,.06); }
+.prog-item .pid    { font-size: 13px; font-weight: 600; white-space: nowrap;
+                     overflow: hidden; text-overflow: ellipsis; }
+.prog-item .pmeta  { font-size: 11px; color: var(--muted); margin-top: 1px; }
+.no-progs { padding: 10px 15px; font-size: 12px; color: var(--muted); }
 
-.sb-section-hdr {
-  padding: 14px 16px 6px;
-  font-size: 10px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 1px;
-  color: var(--muted);
-}
-.prog-item {
-  padding: 10px 16px;
-  cursor: pointer;
-  border-left: 3px solid transparent;
-  transition: background .12s;
-}
-.prog-item:hover { background: rgba(0,0,0,.04); }
-.prog-item.active { border-left-color: var(--accent); background: rgba(50,104,192,.06); }
-.prog-item .pid  { font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.prog-item .pmeta { font-size: 11px; color: var(--muted); margin-top: 2px; }
-.no-progs { padding: 10px 16px; font-size: 12px; color: var(--muted); }
+/* ── Card ──────────────────────────────────────────────────── */
+.card { background: var(--card); border: 1px solid var(--border);
+        border-radius: var(--radius); padding: 20px 22px; margin-bottom: 16px;
+        box-shadow: 0 1px 3px rgba(0,0,0,.05); }
+.card-title { font-size: 15px; font-weight: 700; margin-bottom: 16px; }
 
-/* ── Main area ───────────────────────────────────────────────────── */
-.main { flex: 1; overflow-y: auto; padding: 24px 28px; }
-
-/* ── Card ────────────────────────────────────────────────────────── */
-.card {
-  background: var(--card);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 22px 24px;
-  margin-bottom: 18px;
-  box-shadow: 0 1px 3px rgba(0,0,0,.06);
-}
-.card-title { font-size: 15px; font-weight: 700; margin-bottom: 18px; }
-
-/* ── Form groups ─────────────────────────────────────────────────── */
-.fg { margin-bottom: 15px; }
-.fg > label {
-  display: block;
-  font-size: 12px;
-  font-weight: 600;
-  margin-bottom: 5px;
-}
+/* ── Form ──────────────────────────────────────────────────── */
+.fg { margin-bottom: 13px; }
+.fg > label { display: block; font-size: 12px; font-weight: 600; margin-bottom: 4px; }
 .fg label .opt { font-weight: 400; color: var(--muted); margin-left: 4px; }
-.fg label .req { color: var(--error); margin-left: 2px; }
-
+.fg label .req { color: var(--error); }
 input[type=text] {
-  width: 100%;
-  padding: 8px 10px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  font-size: 14px;
-  background: var(--bg);
-  color: var(--text);
-  outline: none;
-  transition: border-color .15s;
+  width: 100%; padding: 7px 9px; border: 1px solid var(--border);
+  border-radius: var(--radius); font-size: 14px; background: var(--bg);
+  color: var(--text); outline: none; transition: border-color .12s;
 }
 input[type=text]:focus { border-color: var(--accent); }
 
-/* ── Programme badge ─────────────────────────────────────────────── */
-.pb { display: inline-flex; align-items: center; gap: 5px;
-      margin-top: 5px; padding: 3px 8px; border-radius: 3px;
+.pb { display: inline-flex; align-items: center; gap: 4px;
+      margin-top: 4px; padding: 2px 7px; border-radius: 3px;
       font-size: 11px; font-weight: 600; }
 .pb.new      { background: #EDF3FF; color: var(--accent); }
 .pb.existing { background: #EDF7EE; color: var(--success); }
 
-/* ── Drop zone ───────────────────────────────────────────────────── */
 .dropzone {
-  border: 2px dashed var(--border);
-  border-radius: var(--radius);
-  padding: 18px;
-  text-align: center;
-  cursor: pointer;
-  position: relative;
-  background: var(--bg);
-  transition: border-color .15s, background .15s;
+  border: 2px dashed var(--border); border-radius: var(--radius);
+  padding: 14px; text-align: center; position: relative;
+  background: var(--bg); transition: border-color .12s, background .12s; cursor: pointer;
 }
-.dropzone:hover, .dropzone.over {
-  border-color: var(--accent);
-  background: rgba(50,104,192,.04);
-}
-.dropzone input[type=file] {
-  position: absolute;
-  inset: 0;
-  opacity: 0;
-  cursor: pointer;
-  width: 100%;
-  height: 100%;
-}
-.dropzone .dz-icon { font-size: 20px; margin-bottom: 5px; }
+.dropzone:hover, .dropzone.over { border-color: var(--accent); background: rgba(50,104,192,.04); }
+.dropzone input[type=file] { position: absolute; inset: 0; opacity: 0; cursor: pointer; width: 100%; height: 100%; }
+.dropzone .dz-icon { font-size: 18px; margin-bottom: 4px; }
 .dropzone p { font-size: 12px; color: var(--muted); }
 .dropzone p label { color: var(--accent); cursor: pointer; text-decoration: underline; }
-.file-label { margin-top: 5px; font-size: 12px; font-weight: 500; color: var(--success); min-height: 15px; }
+.file-lbl { margin-top: 4px; font-size: 12px; font-weight: 500; color: var(--success); min-height: 14px; }
 
-/* ── Run button ──────────────────────────────────────────────────── */
 .run-btn {
-  width: 100%;
-  padding: 11px;
-  background: var(--accent);
-  color: #fff;
-  border: none;
-  border-radius: var(--radius);
-  font-size: 14px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: background .12s;
-  margin-top: 4px;
+  width: 100%; padding: 10px; background: var(--accent); color: #fff;
+  border: none; border-radius: var(--radius); font-size: 14px; font-weight: 600;
+  cursor: pointer; transition: background .12s; margin-top: 4px;
 }
 .run-btn:hover    { background: #2555A8; }
 .run-btn:disabled { background: #97AACB; cursor: not-allowed; }
 
-/* ── Back button ─────────────────────────────────────────────────── */
+/* ── Back btn ──────────────────────────────────────────────── */
 .back-btn {
-  padding: 7px 14px;
-  background: transparent;
-  color: var(--muted);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  font-size: 13px;
-  cursor: pointer;
-  margin-bottom: 16px;
+  padding: 6px 13px; background: transparent; color: var(--muted);
+  border: 1px solid var(--border); border-radius: var(--radius);
+  font-size: 13px; cursor: pointer; margin-bottom: 14px;
   transition: color .12s, border-color .12s;
 }
 .back-btn:hover { color: var(--text); border-color: var(--text); }
 
-/* ── Pipeline section ────────────────────────────────────────────── */
-.section-title {
-  font-size: 11px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: .9px;
-  color: var(--muted);
-  margin-bottom: 14px;
-}
-
-/* ── Steps ───────────────────────────────────────────────────────── */
-.steps { display: flex; align-items: stretch; gap: 6px; margin-bottom: 18px; }
+/* ── Steps ─────────────────────────────────────────────────── */
+.sec-title { font-size: 10px; font-weight: 700; text-transform: uppercase;
+             letter-spacing: 1px; color: var(--muted); margin-bottom: 12px; }
+.steps { display: flex; align-items: stretch; gap: 6px; margin-bottom: 16px; }
 .step {
-  flex: 1;
-  background: var(--card);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  padding: 11px 13px;
-  transition: border-color .2s;
+  flex: 1; background: var(--card); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 10px 12px; transition: border-color .2s;
 }
-.step .s-num  { font-size: 10px; font-weight: 700; color: var(--muted); margin-bottom: 3px; text-transform: uppercase; letter-spacing: .5px; }
+.step .s-num  { font-size: 10px; font-weight: 700; color: var(--muted);
+                text-transform: uppercase; letter-spacing: .5px; margin-bottom: 3px; }
 .step .s-name { font-size: 13px; font-weight: 600; }
 .step .s-stat { font-size: 11px; color: var(--muted); margin-top: 4px; min-height: 14px; }
-.step-sep { display: flex; align-items: center; color: var(--border); font-size: 16px; padding-top: 4px; }
+.step-sep { display: flex; align-items: center; color: var(--border); font-size: 18px; }
 
 .step.running { border-color: var(--accent); }
 .step.running .s-num  { color: var(--accent); }
 .step.running .s-stat { color: var(--accent); }
-@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
-.step.running .s-stat { animation: pulse 1.5s ease-in-out infinite; }
+@keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.35} }
+.step.running .s-stat { animation: pulse 1.4s ease-in-out infinite; }
 
 .step.done { border-color: var(--success); }
 .step.done .s-num  { color: var(--success); }
@@ -210,96 +145,110 @@ input[type=text]:focus { border-color: var(--accent); }
 .step.error { border-color: var(--error); }
 .step.error .s-stat { color: var(--error); animation: none; }
 
-/* ── Progress bar ────────────────────────────────────────────────── */
-.prog-wrap {
-  background: var(--border);
-  border-radius: 4px;
-  height: 7px;
-  margin-bottom: 5px;
-  overflow: hidden;
-}
-.prog-fill {
-  height: 100%;
-  background: var(--accent);
-  border-radius: 4px;
-  width: 0%;
-  transition: width .5s ease;
-}
-.prog-pct { font-size: 12px; color: var(--muted); margin-bottom: 14px; }
+/* ── Progress bar ──────────────────────────────────────────── */
+.prog-wrap { background: var(--border); border-radius: 4px; height: 6px;
+             margin-bottom: 4px; overflow: hidden; }
+.prog-fill { height: 100%; background: var(--accent); border-radius: 4px;
+             width: 0%; transition: width .5s ease; }
+.prog-pct  { font-size: 12px; color: var(--muted); margin-bottom: 14px; }
 
-/* ── Active tool banner ──────────────────────────────────────────── */
-.active-tool {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--accent);
-  margin-bottom: 12px;
-  min-height: 15px;
+/* ── Now Executing panel ───────────────────────────────────── */
+.exec-panel {
+  background: var(--card); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 11px 14px; margin-bottom: 14px;
+  display: flex; align-items: flex-start; gap: 10px; min-height: 52px;
 }
+.exec-dot {
+  width: 10px; height: 10px; border-radius: 50%;
+  background: var(--muted); margin-top: 3px; flex: none;
+  transition: background .3s;
+}
+.exec-dot.running { background: var(--accent); animation: pulse 1.2s infinite; }
+.exec-dot.done    { background: var(--success); animation: none; }
+.exec-body { flex: 1; }
+.exec-label { font-size: 13px; font-weight: 600; color: var(--text); }
+.exec-sub   { font-size: 11px; color: var(--muted); margin-top: 2px; }
 
-/* ── Console ─────────────────────────────────────────────────────── */
-.console-hdr {
-  font-size: 10px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: .9px;
-  color: var(--muted);
-  margin-bottom: 7px;
+/* ── Console ───────────────────────────────────────────────── */
+.con-hdr {
+  font-size: 10px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 1px; color: var(--muted); margin-bottom: 6px;
+  display: flex; align-items: center; gap: 8px;
 }
+.con-hdr .dot { width: 7px; height: 7px; border-radius: 50%; background: #383830; }
+.con-hdr .dot.live { background: #3ECB72; animation: pulse 1.4s infinite; }
+
 .console {
-  background: #1A1A18;
-  border: 1px solid #2C2C28;
-  border-radius: var(--radius);
-  padding: 11px 13px;
-  font-family: "Courier New", Courier, monospace;
-  font-size: 12px;
-  line-height: 1.6;
-  height: 340px;
-  overflow-y: auto;
+  background: var(--con-bg); border: 1px solid var(--con-border);
+  border-radius: var(--radius); padding: 10px 12px;
+  font-family: "Courier New", Courier, monospace; font-size: 12px;
+  line-height: 1.65; height: 380px; overflow-y: auto;
 }
-.console .row  { display: flex; gap: 8px; margin-bottom: 1px; }
-.console .ts   { color: #505048; flex: none; width: 50px; }
-.console .lbl  { color: #7A9FD4; flex: none; width: 170px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.console .msg  { color: #CCCAC0; word-break: break-all; flex: 1; }
-.console .msg.WARN  { color: #CCA040; }
-.console .msg.ERROR { color: #D04848; }
-.console .sys-row { color: #505048; font-style: italic; margin-bottom: 3px; }
+
+/* Console row types */
+.row       { display: flex; gap: 0; margin-bottom: 1px; }
+.ts        { color: var(--c-ts); flex: none; width: 52px; margin-right: 6px; }
+.lbl       { flex: none; width: 156px; margin-right: 8px;
+             white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* Label colours by type */
+.t-orchestrator .lbl { color: var(--c-orch); }
+.t-agent        .lbl { color: var(--c-agent); }
+.t-tool         .lbl { color: var(--c-tool); }
+.t-skill        .lbl { color: var(--c-skill); }
+.t-workspace    .lbl { color: var(--c-ws); }
+
+/* Message colours */
+.msg            { color: var(--c-white); flex: 1; word-break: break-all; }
+.t-skill   .msg { color: var(--c-lavender); }
+.msg.done       { color: var(--c-green); }
+.msg.running    { color: var(--c-cyan); }
+.msg.warn       { color: var(--c-amber) !important; }
+.msg.err        { color: var(--c-red)   !important; }
+
+/* System / separator rows */
+.sys-row {
+  color: var(--c-sys); font-style: italic;
+  margin: 4px 0 3px; padding: 2px 0;
+  border-top: 1px solid #1C1C1A;
+  border-bottom: 1px solid #1C1C1A;
+  letter-spacing: .3px;
+}
+.sys-row.hi { color: #444; }
 </style>
 </head>
 <body>
 <div class="app">
 
-  <!-- ── Sidebar ─────────────────────────────────────────────────── -->
+  <!-- Sidebar -->
   <aside class="sidebar">
     <div class="brand">
       <h1>Cobalt</h1>
       <p>Vendor Intelligence Platform</p>
     </div>
-    <div class="sb-section-hdr">Recent Programmes</div>
+    <div class="sb-hdr">Recent Programmes</div>
     <div id="recent-list"><p class="no-progs">Loading…</p></div>
   </aside>
 
-  <!-- ── Main ───────────────────────────────────────────────────── -->
+  <!-- Main -->
   <main class="main">
 
-    <!-- Form section -->
+    <!-- ── Form ──────────────────────────────────────────────── -->
     <div id="form-section">
       <div class="card">
         <div class="card-title">Pipeline Configuration</div>
 
-        <!-- Programme -->
         <div class="fg">
           <label>Programme ID <span class="req">*</span></label>
           <input type="text" id="prog-id" placeholder="e.g. sales-q3-2026" autocomplete="off">
           <div id="prog-badge"></div>
         </div>
 
-        <!-- Own company -->
         <div class="fg">
           <label>Your Company Name <span class="req">*</span></label>
-          <input type="text" id="own-company" value="Kozmo Programs" placeholder="e.g. Acme Corp">
+          <input type="text" id="own-company" value="Kozmo Programs">
         </div>
 
-        <!-- Vendor list -->
         <div class="fg">
           <label>Vendor List <span class="req">*</span> <span class="opt">CSV or XLSX</span></label>
           <div class="dropzone" id="vl-zone">
@@ -307,10 +256,9 @@ input[type=text]:focus { border-color: var(--accent); }
             <div class="dz-icon">📋</div>
             <p>Drop file here or <label for="vl-file">browse</label></p>
           </div>
-          <div class="file-label" id="vl-label"></div>
+          <div class="file-lbl" id="vl-lbl"></div>
         </div>
 
-        <!-- Documents -->
         <div class="fg">
           <label>Documents <span class="opt">optional — contracts, invoices, SOWs, amendments</span></label>
           <div class="dropzone" id="doc-zone">
@@ -318,18 +266,18 @@ input[type=text]:focus { border-color: var(--accent); }
             <div class="dz-icon">📄</div>
             <p>Drop files here or <label for="doc-files">browse</label></p>
           </div>
-          <div class="file-label" id="doc-label"></div>
+          <div class="file-lbl" id="doc-lbl"></div>
         </div>
 
         <button class="run-btn" id="run-btn">▶ Start Pipeline</button>
       </div>
     </div>
 
-    <!-- Pipeline progress section (hidden until run) -->
+    <!-- ── Pipeline view ──────────────────────────────────────── -->
     <div id="pipeline-section" style="display:none">
       <button class="back-btn" id="back-btn">← New Run</button>
 
-      <div class="section-title">Pipeline Progress</div>
+      <div class="sec-title">Pipeline Progress</div>
 
       <div class="steps">
         <div class="step" id="s-intake">
@@ -349,13 +297,31 @@ input[type=text]:focus { border-color: var(--accent); }
           <div class="s-name">Relationship &amp; Spend</div>
           <div class="s-stat" id="ss-rs">Pending</div>
         </div>
+        <div class="step-sep">›</div>
+        <div class="step" id="s-analysis">
+          <div class="s-num">④ Analysis</div>
+          <div class="s-name">Intelligence &amp; CRI</div>
+          <div class="s-stat" id="ss-analysis">Pending</div>
+        </div>
       </div>
 
       <div class="prog-wrap"><div class="prog-fill" id="prog-fill"></div></div>
       <div class="prog-pct" id="prog-pct">0%</div>
-      <div class="active-tool" id="active-tool"></div>
 
-      <div class="console-hdr">Console Output</div>
+      <!-- Now Executing panel -->
+      <div class="exec-panel">
+        <div class="exec-dot" id="exec-dot"></div>
+        <div class="exec-body">
+          <div class="exec-label" id="exec-label">Initialising…</div>
+          <div class="exec-sub"   id="exec-sub"></div>
+        </div>
+      </div>
+
+      <!-- Console -->
+      <div class="con-hdr">
+        <div class="dot" id="con-dot"></div>
+        Console Output
+      </div>
       <div class="console" id="console"></div>
     </div>
 
@@ -369,92 +335,75 @@ async function loadRecent() {
   const el = document.getElementById('recent-list');
   try {
     const list = await fetch('/api/programmes').then(r => r.json());
-    if (!list.length) {
-      el.innerHTML = '<p class="no-progs">No programmes yet.</p>';
-      return;
-    }
+    if (!list.length) { el.innerHTML = '<p class="no-progs">No programmes yet.</p>'; return; }
     el.innerHTML = list.map(p => `
-      <div class="prog-item" data-id="${esc(p.programme_id)}" onclick="selectProg('${esc(p.programme_id)}')">
-        <div class="pid">${esc(p.programme_id)}</div>
-        <div class="pmeta">${p.vendor_count} vendor${p.vendor_count !== 1 ? 's' : ''} · ${esc(p.last_run)}</div>
+      <div class="prog-item" data-id="${x(p.programme_id)}" onclick="selProg('${x(p.programme_id)}')">
+        <div class="pid">${x(p.programme_id)}</div>
+        <div class="pmeta">${p.vendor_count} vendor${p.vendor_count!==1?'s':''} · ${x(p.last_run)}</div>
       </div>`).join('');
-  } catch {
-    el.innerHTML = '<p class="no-progs">Could not load.</p>';
-  }
+  } catch { el.innerHTML = '<p class="no-progs">Could not load.</p>'; }
 }
 
-function selectProg(id) {
-  const inp = document.getElementById('prog-id');
-  inp.value = id;
+function selProg(id) {
+  document.getElementById('prog-id').value = id;
   checkProg(id);
-  document.querySelectorAll('.prog-item').forEach(el =>
-    el.classList.toggle('active', el.dataset.id === id));
+  document.querySelectorAll('.prog-item').forEach(e =>
+    e.classList.toggle('active', e.dataset.id === id));
 }
 
-// ── Programme existence check ──────────────────────────────────────
-let _debounce = null;
-document.getElementById('prog-id').addEventListener('input', function () {
-  clearTimeout(_debounce);
+// ── Programme check ────────────────────────────────────────────────
+let _dt = null;
+document.getElementById('prog-id').addEventListener('input', function() {
+  clearTimeout(_dt);
   const v = this.value.trim();
   document.getElementById('prog-badge').innerHTML = '';
   if (!v) return;
-  _debounce = setTimeout(() => checkProg(v), 350);
+  _dt = setTimeout(() => checkProg(v), 350);
 });
 
 async function checkProg(id) {
   try {
-    const d = await fetch('/api/check-programme?id=' + encodeURIComponent(id)).then(r => r.json());
-    const badge = document.getElementById('prog-badge');
-    badge.innerHTML = d.exists
+    const d = await fetch('/api/check-programme?id=' + encodeURIComponent(id)).then(r=>r.json());
+    document.getElementById('prog-badge').innerHTML = d.exists
       ? '<span class="pb existing">✓ Existing programme — will resume</span>'
       : '<span class="pb new">+ New programme — will be created</span>';
   } catch {}
 }
 
-// ── Drop zones ─────────────────────────────────────────────────────
-function setupDrop(zoneId, inputId, labelId, multi) {
-  const zone  = document.getElementById(zoneId);
-  const input = document.getElementById(inputId);
-  const lbl   = document.getElementById(labelId);
-
-  input.addEventListener('change', () => refreshLabel(input, lbl, multi));
+// ── Dropzones ──────────────────────────────────────────────────────
+function initDrop(zoneId, inputId, lblId, multi) {
+  const zone = document.getElementById(zoneId);
+  const inp  = document.getElementById(inputId);
+  const lbl  = document.getElementById(lblId);
+  inp.addEventListener('change', () => updLbl(inp, lbl, multi));
   zone.addEventListener('dragover',  e => { e.preventDefault(); zone.classList.add('over'); });
   zone.addEventListener('dragleave', ()  => zone.classList.remove('over'));
   zone.addEventListener('drop', e => {
-    e.preventDefault();
-    zone.classList.remove('over');
-    const dt = e.dataTransfer;
-    if (dt && dt.files.length) {
-      try { input.files = dt.files; } catch {}
-      refreshLabel(input, lbl, multi);
-    }
+    e.preventDefault(); zone.classList.remove('over');
+    if (e.dataTransfer.files.length) { try { inp.files = e.dataTransfer.files; } catch{} updLbl(inp, lbl, multi); }
   });
 }
-
-function refreshLabel(input, lbl, multi) {
-  const files = input.files;
-  if (!files || !files.length) { lbl.textContent = ''; return; }
-  lbl.textContent = multi
-    ? `✓ ${files.length} file${files.length !== 1 ? 's' : ''} selected`
-    : `✓ ${files[0].name}`;
+function updLbl(inp, lbl, multi) {
+  const f = inp.files;
+  lbl.textContent = !f || !f.length ? '' : multi
+    ? `✓ ${f.length} file${f.length!==1?'s':''} selected`
+    : `✓ ${f[0].name}`;
 }
+initDrop('vl-zone',  'vl-file',   'vl-lbl',  false);
+initDrop('doc-zone', 'doc-files', 'doc-lbl', true);
 
-setupDrop('vl-zone',  'vl-file',   'vl-label',  false);
-setupDrop('doc-zone', 'doc-files', 'doc-label', true);
-
-// ── Run button ─────────────────────────────────────────────────────
+// ── Run ────────────────────────────────────────────────────────────
 document.getElementById('run-btn').addEventListener('click', async () => {
   const progId   = document.getElementById('prog-id').value.trim();
   const ownCo    = document.getElementById('own-company').value.trim();
   const vlFile   = document.getElementById('vl-file').files[0];
   const docFiles = document.getElementById('doc-files').files;
 
-  if (!progId)  { flash('Please enter a Programme ID.'); return; }
-  if (!ownCo)   { flash('Please enter your company name.'); return; }
-  if (!vlFile)  { flash('Please select a vendor list file.'); return; }
+  if (!progId) { alert('Enter a Programme ID.'); return; }
+  if (!ownCo)  { alert('Enter your company name.'); return; }
+  if (!vlFile) { alert('Select a vendor list file.'); return; }
 
-  setRunBtn(false, '⟳ Starting…');
-
+  setBtn(false, '⟳ Starting…');
   const fd = new FormData();
   fd.append('programme_id', progId);
   fd.append('own_company',  ownCo);
@@ -462,155 +411,165 @@ document.getElementById('run-btn').addEventListener('click', async () => {
   for (const f of docFiles) fd.append('documents', f);
 
   try {
-    const res  = await fetch('/api/run', { method: 'POST', body: fd });
-    const data = await res.json();
-    if (data.error) { flash('Error: ' + data.error); setRunBtn(true, '▶ Start Pipeline'); return; }
-    openPipelineView(data.run_id, progId);
-  } catch (e) {
-    flash('Server error: ' + e.message);
-    setRunBtn(true, '▶ Start Pipeline');
-  }
+    const d = await fetch('/api/run', { method:'POST', body:fd }).then(r=>r.json());
+    if (d.error) { alert('Error: ' + d.error); setBtn(true,'▶ Start Pipeline'); return; }
+    openRun(d.run_id, progId);
+  } catch(e) { alert('Server error: '+e.message); setBtn(true,'▶ Start Pipeline'); }
 });
 
-// ── Back button ────────────────────────────────────────────────────
+// ── Back ───────────────────────────────────────────────────────────
 document.getElementById('back-btn').addEventListener('click', () => {
   document.getElementById('pipeline-section').style.display = 'none';
   document.getElementById('form-section').style.display = '';
-  setRunBtn(true, '▶ Start Pipeline');
+  setBtn(true,'▶ Start Pipeline');
   loadRecent();
 });
 
 // ── Pipeline view ──────────────────────────────────────────────────
-function openPipelineView(runId, progId) {
-  document.getElementById('form-section').style.display    = 'none';
+function openRun(runId, progId) {
+  document.getElementById('form-section').style.display = 'none';
   document.getElementById('pipeline-section').style.display = '';
 
   // Reset steps
-  ['intake','enrichment','rs'].forEach(s => {
-    const el = document.getElementById('s-' + s);
-    el.className = 'step';
-    document.getElementById('ss-' + s).textContent = 'Pending';
+  ['intake','enrichment','rs','analysis'].forEach(s => {
+    document.getElementById('s-'+s).className = 'step';
+    document.getElementById('ss-'+s).textContent = 'Pending';
   });
   setProgress(0);
-  document.getElementById('active-tool').textContent = '';
-  document.getElementById('console').innerHTML = '';
+  setExec('Connecting to pipeline…', '');
+  document.getElementById('exec-dot').className = 'exec-dot running';
+  document.getElementById('con-dot').className  = 'dot live';
+  document.getElementById('console').innerHTML  = '';
 
-  sysLog(`Programme: ${progId}`);
-  sysLog('Connecting to pipeline…');
+  sysRow('Programme: ' + progId, true);
 
-  // SSE
-  const es = new EventSource('/api/run/' + runId + '/stream');
+  const es = new EventSource('/api/run/'+runId+'/stream');
 
   es.onmessage = e => {
     const msg = JSON.parse(e.data);
+    if (msg.type === 'ping') return;
+    if (msg.type === 'done') { es.close(); return; }
 
-    if (msg.type === 'ping')  return;
-    if (msg.type === 'done')  { es.close(); return; }
-
+    // ── Log entry ────────────────────────────────────────────────
     if (msg.type === 'log') {
-      consoleLog(msg.ts, msg.label || '', msg.msg,
-        msg.level === 'WARNING' ? 'WARN' : msg.level === 'ERROR' ? 'ERROR' : '');
+      const et  = msg.entry_type || 'orchestrator';
+      const lv  = msg.level || 'INFO';
+      const txt = msg.msg || '';
 
-      if (msg.label && /^Tool/.test(msg.label))
-        document.getElementById('active-tool').textContent = '⟳ ' + msg.label;
+      // Classify message tone
+      let tone = '';
+      if (lv === 'WARNING') tone = 'warn';
+      else if (lv === 'ERROR') tone = 'err';
+      else if (/✓|Done|COMPLETED|completed|created|success/i.test(txt)) tone = 'done';
+      else if (/Running|starting|collecting|enriching|processing|aggregat/i.test(txt)) tone = 'running';
+
+      consoleRow(msg.ts, msg.label, txt, et, tone);
+
+      // Update "Now Executing" sub for vendor progress
+      const m = txt.match(/\[(\d+)\/(\d+)\]\s+(?:enriching|RS processing|Analysis processing|processing)\s+(.+)/i);
+      if (m) setExec(document.getElementById('exec-label').textContent,
+                     `Vendor ${m[1]} / ${m[2]} — ${m[3]}`);
+
+      // Highlight active tool
+      if (et === 'tool') setExec(msg.label, document.getElementById('exec-sub').textContent);
     }
 
+    // ── Step events ───────────────────────────────────────────────
     if (msg.type === 'step') {
       setProgress(msg.progress || 0);
-      const names = { intake: 'Intake', enrichment: 'P2 Enrichment', rs: 'RS Pipeline' };
+      const names = {
+        intake:'Vendor Intake', enrichment:'P2 Enrichment',
+        rs:'RS Pipeline', analysis:'Analysis & Intelligence'
+      };
       const name  = names[msg.step] || msg.step;
 
       if (msg.status === 'running') {
-        setStep(msg.step, 'running', 'Running…');
-        document.getElementById('active-tool').textContent = '⟳ Running ' + name + '…';
-        sysLog('▶ ' + name + ' started');
+        setStep(msg.step, 'running', '⟳ Running…');
+        setExec('Step: ' + name, '');
+        sysRow('▶  ' + name + ' started');
       }
-
       if (msg.status === 'done') {
-        let summary = '';
-        if (msg.step === 'intake')     summary = `${msg.confirmed} confirmed, ${msg.triage} triage`;
-        if (msg.step === 'enrichment') summary = `${msg.completed} / ${msg.total} completed`;
-        if (msg.step === 'rs')         summary = `${msg.completed} / ${msg.total} profiles`;
-        setStep(msg.step, 'done', '✓ ' + summary);
-        document.getElementById('active-tool').textContent = '';
-        sysLog('✓ ' + name + ' done — ' + summary);
+        let sum = '';
+        if (msg.step==='intake')     sum = `${msg.confirmed} confirmed  ${msg.triage} triage`;
+        if (msg.step==='enrichment') sum = `${msg.completed} / ${msg.total} completed`;
+        if (msg.step==='rs')         sum = `${msg.completed} / ${msg.total} profiles`;
+        if (msg.step==='analysis')   sum = `${msg.completed} / ${msg.total} analysed`;
+        setStep(msg.step, 'done', '✓ ' + sum);
+        setExec('', '');
+        sysRow('✓  ' + name + ' done — ' + sum);
       }
-
       if (msg.status === 'error') {
         setStep(msg.step, 'error', '✗ Failed');
-        sysLog('✗ ' + name + ' failed');
+        sysRow('✗  ' + name + ' failed');
       }
     }
 
     if (msg.type === 'pipeline_done') {
       setProgress(100);
-      document.getElementById('active-tool').textContent = '✓ Pipeline complete';
-      sysLog('━━━ Pipeline completed successfully ━━━');
-      setRunBtn(true, '▶ Start Pipeline');
+      setExec('✓ Pipeline complete', 'All steps finished');
+      document.getElementById('exec-dot').className = 'exec-dot done';
+      document.getElementById('con-dot').className  = 'dot';
+      sysRow('━━━  Pipeline completed successfully  ━━━', true);
+      setBtn(true,'▶ Start Pipeline');
       loadRecent();
     }
-
     if (msg.type === 'pipeline_error') {
-      document.getElementById('active-tool').textContent = '✗ Pipeline error';
-      sysLog('✗ ' + (msg.msg || 'Unknown error'));
-      setRunBtn(true, '▶ Start Pipeline');
+      setExec('✗ Pipeline error', msg.msg || '');
+      document.getElementById('exec-dot').className = 'exec-dot';
+      document.getElementById('con-dot').className  = 'dot';
+      sysRow('✗  ' + (msg.msg||'Unknown error'), true);
+      setBtn(true,'▶ Start Pipeline');
     }
   };
 
-  es.onerror = () => {
-    sysLog('⚠ Connection lost.');
-    es.close();
-  };
+  es.onerror = () => { sysRow('Connection lost.'); es.close(); };
 }
 
-// ── Helpers ────────────────────────────────────────────────────────
-function setStep(step, cls, text) {
-  const el = document.getElementById('s-' + step);
-  el.className = 'step ' + cls;
-  document.getElementById('ss-' + step).textContent = text;
+// ── DOM helpers ────────────────────────────────────────────────────
+function setStep(step, cls, txt) {
+  document.getElementById('s-'+step).className = 'step '+cls;
+  document.getElementById('ss-'+step).textContent = txt;
+}
+function setProgress(p) {
+  document.getElementById('prog-fill').style.width = p+'%';
+  document.getElementById('prog-pct').textContent  = p+'%';
+}
+function setExec(label, sub) {
+  if (label) document.getElementById('exec-label').textContent = label;
+  document.getElementById('exec-sub').textContent = sub || '';
+}
+function setBtn(en, txt) {
+  const b = document.getElementById('run-btn');
+  b.disabled = !en; b.textContent = txt;
 }
 
-function setProgress(pct) {
-  document.getElementById('prog-fill').style.width = pct + '%';
-  document.getElementById('prog-pct').textContent  = pct + '%';
-}
-
-function consoleLog(ts, label, msg, level) {
+function consoleRow(ts, label, msg, entryType, tone) {
   const cons = document.getElementById('console');
   const row  = document.createElement('div');
-  row.className = 'row';
+  row.className = 'row t-' + (entryType||'orchestrator');
   row.innerHTML =
-    `<span class="ts">${esc(ts)}</span>` +
-    `<span class="lbl">${esc(label)}</span>` +
-    `<span class="msg ${level}">${esc(msg)}</span>`;
+    `<span class="ts">${x(ts)}</span>` +
+    `<span class="lbl">${x(label||'')}</span>` +
+    `<span class="msg ${tone}">${x(msg)}</span>`;
   cons.appendChild(row);
+  trim(cons, 700);
   cons.scrollTop = cons.scrollHeight;
-  while (cons.children.length > 600) cons.removeChild(cons.firstChild);
 }
 
-function sysLog(msg) {
+function sysRow(msg, highlight) {
   const cons = document.getElementById('console');
-  const row  = document.createElement('div');
-  row.className = 'sys-row';
-  row.textContent = msg;
-  cons.appendChild(row);
+  const d = document.createElement('div');
+  d.className = 'sys-row' + (highlight ? ' hi' : '');
+  d.textContent = msg;
+  cons.appendChild(d);
   cons.scrollTop = cons.scrollHeight;
 }
 
-function setRunBtn(enabled, label) {
-  const btn = document.getElementById('run-btn');
-  btn.disabled    = !enabled;
-  btn.textContent = label;
+function trim(el, max) {
+  while (el.children.length > max) el.removeChild(el.firstChild);
 }
-
-function flash(msg) { alert(msg); }
-
-function esc(s) {
-  return String(s)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
+function x(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
 // ── Init ───────────────────────────────────────────────────────────

@@ -10,10 +10,13 @@ and _strip_corporate_suffixes functions).
 
 from __future__ import annotations
 
+import logging
 import re
 import unicodedata
 
 from jellyfish import jaro_winkler_similarity
+
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -110,5 +113,7 @@ def best_match(
             best_candidate = candidate
 
     if best_score >= threshold and best_candidate is not None:
+        logger.info("fuzzy_score: '%s' -> '%s' (%.2f)", query[:40], best_candidate[:40], best_score)
         return (best_candidate, best_score)
+    logger.info("fuzzy_score: no match for '%s' above %.2f", query[:40], threshold)
     return None
