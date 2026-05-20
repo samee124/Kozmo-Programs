@@ -197,7 +197,7 @@ def _sync_deduplication_report(session: Session, data: dict, vendor_id: str) -> 
 
 
 def _sync_run_log(session: Session, data: dict, vendor_id: str) -> None:
-    """run_log.md written → update ProgrammeRun.Status to reflect intake outcome."""
+    """run_log.md written → update ProgrammeRun.Status and LastRunAt."""
     programme_id = data.get("programme_id")
     status = data.get("status")
     if not programme_id or not status:
@@ -205,14 +205,22 @@ def _sync_run_log(session: Session, data: dict, vendor_id: str) -> None:
     session.execute(
         update(ProgrammeRun)
         .where(ProgrammeRun.programme_id == programme_id)
-        .values(status=status)
+        .values(status=status, last_run_at=datetime.utcnow())
     )
 
 
 def _sync_triage_queue(session: Session, data: dict, vendor_id: str) -> None:
-    """triage_queue.md written → update ProgrammeRun.Triage counter."""
+    """triage_queue.md written → update ProgrammeRun.Triage counter.
+
+    Supports both triage_count (integer) and triage_items (list) keys.
+    The orchestrator writes triage_items; triage_count is kept for compatibility.
+    """
     programme_id = data.get("programme_id")
     triage_count = data.get("triage_count")
+    if triage_count is None:
+        items = data.get("triage_items")
+        if isinstance(items, list):
+            triage_count = len(items)
     if not programme_id or triage_count is None:
         return
     session.execute(
@@ -243,28 +251,55 @@ def _sync_single_vendor_file(session: Session, data: dict, vendor_id: str, progr
     Single-file arch writes {slug}.md at the vendor root. This handler fires for
     any .md file whose name is not in the named-file registry, ensuring the
     VendorIntelligence row is created (idempotent) before the UPDATE runs.
+
+    Nested-field paths in the single-file MD schema:
+      canonical_name              → vendor_name
+      intake.input_name           → input_name
+      intake.confidence           → identity_confidence
+      intake.data_class           → data_class
+      classification.category.value     → category
+      classification.subcategory.value  → subcategory
+      classification.vendor_type.value  → vendor_type
+      identity.hq_country.value         → hq_country
+      size.company_size_band.value      → company_size_band
     """
+    intake = data.get("intake") or {}
+    clf    = data.get("classification") or {}
+    iden   = data.get("identity") or {}
+    size   = data.get("size") or {}
+
+    vendor_name = (
+        data.get("canonical_name")
+        or data.get("vendor_name")
+        or intake.get("input_name")
+        or vendor_id
+    )
+    input_name = intake.get("input_name") or data.get("input_name") or vendor_id
+    data_class  = intake.get("data_class") or data.get("data_class") or "CLASS_D"
+    conf_raw    = intake.get("confidence") if intake.get("confidence") is not None else data.get("identity_confidence")
+    id_conf     = float(conf_raw) if conf_raw is not None else 0.0
+
     insert_vendor(
         vendor_id=vendor_id,
         programme_id=programme_id,
-        vendor_name=data.get("vendor_name") or data.get("input_name") or vendor_id,
-        input_name=data.get("input_name") or vendor_id,
+        vendor_name=vendor_name,
+        input_name=input_name,
         user_id=data.get("user_id") or os.getenv("COBALT_USER_ID"),
-        data_class=data.get("data_class", "CLASS_D"),
-        identity_confidence=float(data.get("identity_confidence") or 0.0),
+        data_class=data_class,
+        identity_confidence=id_conf,
     )
 
     values: dict = {"updated_at": datetime.utcnow()}
     _maybe = lambda k, v: values.update({k: v}) if v is not None else None
 
-    _maybe("vendor_name",        data.get("vendor_name") or data.get("input_name"))
-    _maybe("data_class",         data.get("data_class"))
-    _maybe("identity_confidence", float(data.get("identity_confidence") or 0.0) if data.get("identity_confidence") is not None else None)
-    _maybe("category",           data.get("category"))
-    _maybe("subcategory",        data.get("subcategory"))
-    _maybe("vendor_type",        data.get("vendor_type"))
-    _maybe("hq_country",         data.get("hq_country"))
-    _maybe("company_size_band",  data.get("company_size_band"))
+    _maybe("vendor_name",         vendor_name)
+    _maybe("data_class",          data_class)
+    _maybe("identity_confidence", id_conf)
+    _maybe("category",           (clf.get("category") or {}).get("value") or data.get("category"))
+    _maybe("subcategory",        (clf.get("subcategory") or {}).get("value") or data.get("subcategory"))
+    _maybe("vendor_type",        (clf.get("vendor_type") or {}).get("value") or data.get("vendor_type"))
+    _maybe("hq_country",         (iden.get("hq_country") or {}).get("value") or data.get("hq_country"))
+    _maybe("company_size_band",  (size.get("company_size_band") or {}).get("value") or data.get("company_size_band"))
     _maybe("profile_status",     data.get("profile_status"))
     _maybe("last_enriched_at",   _parse_datetime(data.get("enriched_at") or data.get("last_enriched_at")))
     _maybe("status",             data.get("status") or data.get("intake_status"))

@@ -8,11 +8,12 @@ from cobalt.db.models import VendorIntelligence
 
 
 def test_vendor_intelligence_has_an_columns():
+    # P4 columns use PascalCase DB column names (SQL Server convention)
     cols = [c.name for c in VendorIntelligence.__table__.columns]
-    assert "cri_score" in cols
-    assert "health_band" in cols
-    assert "vendor_state" in cols
-    assert "last_analysed_at" in cols
+    assert "CriScore" in cols
+    assert "HealthBand" in cols
+    assert "VendorState" in cols
+    assert "LastAnalysedAt" in cols
 
 
 def test_vendor_intelligence_has_p3_columns():
@@ -26,5 +27,5 @@ def test_vendor_intelligence_has_p3_columns():
 
 def test_vendor_intelligence_p4_columns_are_nullable():
     col_map = {c.name: c for c in VendorIntelligence.__table__.columns}
-    for col_name in ("cri_score", "health_band", "vendor_state", "last_analysed_at"):
+    for col_name in ("CriScore", "HealthBand", "VendorState", "LastAnalysedAt"):
         assert col_map[col_name].nullable is True, f"{col_name} should be nullable"

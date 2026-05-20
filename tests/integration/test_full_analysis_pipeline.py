@@ -302,7 +302,7 @@ class TestGroupBGateChecks:
 
         result = run_analysis(_VENDOR, _PROG)
         assert result.status == ANRunStatus.BLOCKED.value
-        assert result.error == "entity_not_confirmed"
+        assert result.error == "entity_file_missing"
 
     def test_b2_unconfirmed_entity_blocked(self, an_workspace, stub_all_tools):
         ep = an_workspace / _PROG / _VENDOR / "identity" / "entity.md"

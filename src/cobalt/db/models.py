@@ -79,6 +79,7 @@ class ProgrammeRun(Base):
     created_at: Mapped[datetime] = mapped_column(
         "CreatedAt", DateTime, server_default=func.now()
     )
+    last_run_at: Mapped[datetime | None] = mapped_column("LastRunAt", DateTime, nullable=True)
 
     def __repr__(self) -> str:
         return f"<ProgrammeRun programme_id={self.programme_id!r}>"
@@ -167,10 +168,10 @@ class VendorIntelligence(Base):
     )
 
     # Process 4 — Analysis & Intelligence (null until P4 runs)
-    cri_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
-    health_band: Mapped[str | None] = mapped_column(String(20), nullable=True)
-    vendor_state: Mapped[str | None] = mapped_column(String(20), nullable=True)
-    last_analysed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    cri_score: Mapped[int | None] = mapped_column("CriScore", Integer, nullable=True)
+    health_band: Mapped[str | None] = mapped_column("HealthBand", String(20), nullable=True)
+    vendor_state: Mapped[str | None] = mapped_column("VendorState", String(20), nullable=True)
+    last_analysed_at: Mapped[datetime | None] = mapped_column("LastAnalysedAt", DateTime, nullable=True)
 
     # Audit
     created_at: Mapped[datetime] = mapped_column(

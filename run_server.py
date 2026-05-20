@@ -157,10 +157,6 @@ def _pipeline_thread(
 
     try:
         from cobalt.db.queries import insert_user, insert_programme
-        from cobalt.orchestrator.intake_orchestrator import run_intake
-        from cobalt.orchestrator.enrichment_orchestrator import enrich_all_confirmed
-        from cobalt.orchestrator.rs_orchestrator import run_rs_all_confirmed
-        from cobalt.orchestrator.analysis_orchestrator import run_analysis_all_confirmed
 
         # Bootstrap DB (idempotent)
         insert_user(
@@ -177,6 +173,7 @@ def _pipeline_thread(
         )
 
         # Step 1 — Intake
+        from cobalt.orchestrator.intake_orchestrator import run_intake
         ev("step", step="intake", status="running", progress=2)
         intake = run_intake(
             programme_id=programme_id,
@@ -188,6 +185,7 @@ def _pipeline_thread(
            confirmed=len(intake.confirmed), triage=len(intake.triage))
 
         # Step 2 — Enrichment
+        from cobalt.orchestrator.enrichment_orchestrator import enrich_all_confirmed
         ev("step", step="enrichment", status="running", progress=27)
         enrich_results = enrich_all_confirmed(programme_id=programme_id, max_vendors=200)
         done_e = sum(1 for r in enrich_results if r.status == "COMPLETED")
@@ -195,6 +193,7 @@ def _pipeline_thread(
            completed=done_e, total=len(enrich_results))
 
         # Step 3 — RS Pipeline
+        from cobalt.orchestrator.rs_orchestrator import run_rs_all_confirmed
         ev("step", step="rs", status="running", progress=53)
         rs_results = run_rs_all_confirmed(
             programme_id=programme_id,
@@ -204,12 +203,23 @@ def _pipeline_thread(
         ev("step", step="rs", status="done", progress=75,
            completed=done_rs, total=len(rs_results))
 
-        # Step 4 — Analysis & Intelligence
-        ev("step", step="analysis", status="running", progress=78)
-        an_results = run_analysis_all_confirmed(programme_id=programme_id)
-        done_an = sum(1 for r in an_results if r.status == "COMPLETED")
-        ev("step", step="analysis", status="done", progress=100,
-           completed=done_an, total=len(an_results))
+        # Step 4 — Analysis & Intelligence (isolated: failure here does not abort pipeline)
+        # force=True: UI-triggered pipeline always re-analyses regardless of freshness gate
+        try:
+            from cobalt.orchestrator.analysis_orchestrator import run_analysis_all_confirmed
+            ev("step", step="analysis", status="running", progress=78)
+            an_results = run_analysis_all_confirmed(programme_id=programme_id, force=True)
+            done_an    = sum(1 for r in an_results if r.status == "COMPLETED")
+            skipped_an = sum(1 for r in an_results if r.status == "SKIPPED")
+            ev("step", step="analysis", status="done", progress=100,
+               completed=done_an, skipped=skipped_an, total=len(an_results))
+        except Exception as an_exc:
+            import traceback
+            ev("step", step="analysis", status="error", progress=100)
+            ev("log", level="ERROR", label="Analysis", entry_type="orchestrator",
+               msg=f"Analysis step failed: {an_exc}",
+               ts=datetime.now().strftime("%H:%M:%S"))
+            logging.getLogger("cobalt").error("Analysis step exception: %s", traceback.format_exc())
 
         ev("pipeline_done")
 
@@ -272,6 +282,7 @@ def api_run():
 
     handler = _QueueHandler(q)
     cobalt_log = logging.getLogger("cobalt")
+    cobalt_log.setLevel(logging.INFO)
     cobalt_log.addHandler(handler)
 
     def _run():
@@ -311,6 +322,124 @@ def api_stream(run_id: str):
         mimetype="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+
+@app.route("/api/programmes/<path:programme_id>/vendors")
+def api_programme_vendors(programme_id: str):
+    """List all vendors in a programme with their pipeline stage indicators."""
+    import yaml as _yaml
+    workspace = Path(os.getenv("WORKSPACE_ROOT", "./workspace"))
+    prog_dir  = workspace / programme_id
+
+    if not prog_dir.is_dir():
+        return jsonify([])
+
+    # Read vendor_register.md for ordered vendor list
+    register = prog_dir / "programme_run" / "vendor_register.md"
+    vendor_ids: list[str] = []
+    if register.exists():
+        try:
+            parts = register.read_text(encoding="utf-8").split("---\n", 2)
+            data = _yaml.safe_load(parts[1]) if len(parts) >= 3 else {}
+            vendor_ids = [str(v["vendor_id"]) for v in (data or {}).get("vendors") or [] if v.get("vendor_id")]
+        except Exception:
+            pass
+
+    # Fall back to scanning directory
+    if not vendor_ids:
+        vendor_ids = sorted(
+            d.name for d in prog_dir.iterdir()
+            if d.is_dir() and d.name != "programme_run"
+        )
+
+    out: list[dict] = []
+    for vid in vendor_ids:
+        vdir = prog_dir / vid
+
+        # Find single-file root .md
+        main_md = next((f for f in vdir.iterdir() if f.suffix == ".md" and f.is_file()), None) \
+            if vdir.is_dir() else None
+
+        # Read frontmatter for display fields
+        name = vid; status = "UNKNOWN"; data_class = "CLASS_D"
+        cri_score = None; health_band = None
+        if main_md and main_md.exists():
+            try:
+                parts = main_md.read_text(encoding="utf-8").split("---\n", 2)
+                fm = _yaml.safe_load(parts[1]) if len(parts) >= 3 else {}
+                name       = (fm or {}).get("vendor_name") or (fm or {}).get("input_name") or vid
+                status     = (fm or {}).get("status") or (fm or {}).get("intake_status") or "UNKNOWN"
+                data_class = (fm or {}).get("data_class") or "CLASS_D"
+            except Exception:
+                pass
+
+        # Read P4 analysis_result.md for CRI score / health band
+        analysis_md = vdir / "analysis_result.md"
+        if analysis_md.exists():
+            try:
+                parts = analysis_md.read_text(encoding="utf-8").split("---\n", 2)
+                afm = _yaml.safe_load(parts[1]) if len(parts) >= 3 else {}
+                cri_score   = (afm or {}).get("cri_score")
+                health_band = (afm or {}).get("health_band")
+            except Exception:
+                pass
+
+        out.append({
+            "vendor_id":   vid,
+            "vendor_name": name,
+            "status":      status,
+            "data_class":  data_class,
+            "cri_score":   cri_score,
+            "health_band": health_band,
+            "files": {
+                "main":           main_md is not None,
+                "vendor_profile": (vdir / "profile" / "vendor_profile.md").exists(),
+                "rs_profile":     (vdir / "profile" / "relationship_spend_profile.md").exists(),
+                "analysis":       analysis_md.exists(),
+                "ledger":         (vdir / "execution" / "ledger.md").exists(),
+            },
+        })
+
+    return jsonify(out)
+
+
+@app.route("/api/vendor-file")
+def api_vendor_file():
+    """Return raw content of a vendor workspace MD file."""
+    programme_id = request.args.get("programme", "").strip()
+    vendor_id    = request.args.get("vendor", "").strip()
+    file_type    = request.args.get("file", "main").strip()
+
+    if not programme_id or not vendor_id:
+        return jsonify({"error": "programme and vendor required"}), 400
+
+    workspace = Path(os.getenv("WORKSPACE_ROOT", "./workspace"))
+    vdir = workspace / programme_id / vendor_id
+
+    if file_type == "main":
+        target = next(
+            (f for f in vdir.iterdir() if f.suffix == ".md" and f.is_file()), None
+        ) if vdir.is_dir() else None
+    else:
+        path_map = {
+            "vendor_profile": vdir / "profile" / "vendor_profile.md",
+            "rs_profile":     vdir / "profile" / "relationship_spend_profile.md",
+            "analysis":       vdir / "analysis_result.md",
+            "ledger":         vdir / "execution" / "ledger.md",
+        }
+        target = path_map.get(file_type)
+
+    if target is None or not target.exists():
+        return jsonify({"content": "", "exists": False, "filename": ""})
+
+    try:
+        return jsonify({
+            "content":  target.read_text(encoding="utf-8"),
+            "exists":   True,
+            "filename": target.name,
+        })
+    except Exception as exc:
+        return jsonify({"error": str(exc), "exists": False}), 500
 
 
 if __name__ == "__main__":
