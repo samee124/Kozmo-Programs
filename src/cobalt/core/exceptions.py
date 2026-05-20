@@ -152,6 +152,27 @@ class EnrichmentOrchestrationError(Exception):
     """
 
 
+class ANSchemaError(Exception):
+    """Raised when an AN schema dataclass receives an invalid value in
+    __post_init__ or when from_dict cannot reconstruct the dataclass.
+    Mirrors EnrichmentSchemaError and RSSchemaError patterns.
+    """
+
+
+class ANOrchestrationError(Exception):
+    """Raised when the analysis orchestrator encounters an unrecoverable
+    configuration or infrastructure error. The orchestrator catches this
+    and returns an ANRunResult with status=FAILED rather than propagating.
+    """
+
+
+class EvidenceValidationError(Exception):
+    """Raised when evidence_validator cannot process its inputs due to
+    corrupt or incompatible data structures. The orchestrator catches this,
+    logs WARNING, and returns ANRunResult with status=FAILED.
+    """
+
+
 class BraveSearchError(Exception):
     """Raised when the Brave Search API call fails — missing API key, HTTP error,
     or transport failure.  Callers (collectors) catch this and record a collection

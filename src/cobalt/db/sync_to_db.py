@@ -177,6 +177,21 @@ def _sync_triage_queue(session: Session, data: dict, vendor_id: str) -> None:
     )
 
 
+def _sync_analysis_result(session: Session, data: dict, vendor_id: str) -> None:
+    """analysis_result.md written → update P4 columns on VendorIntelligence."""
+    session.execute(
+        update(VendorIntelligence)
+        .where(VendorIntelligence.vendor_id == vendor_id)
+        .values(
+            cri_score=data.get("cri_score"),
+            health_band=data.get("health_band"),
+            vendor_state=data.get("vendor_state"),
+            last_analysed_at=_parse_datetime(data.get("last_analysed_at")),
+            updated_at=datetime.utcnow(),
+        )
+    )
+
+
 # ─── Handler registry ─────────────────────────────────────────────────────────
 
 _HANDLERS = {
@@ -188,6 +203,7 @@ _HANDLERS = {
     "programme_plan.md":                _sync_programme_plan,
     "vendor_register.md":               _sync_vendor_register,
     "triage_queue.md":                  _sync_triage_queue,
+    "analysis_result.md":               _sync_analysis_result,
 }
 
 

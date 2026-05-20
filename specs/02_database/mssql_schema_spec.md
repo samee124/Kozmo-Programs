@@ -147,6 +147,12 @@ CREATE TABLE VendorIntelligence (
     DependencyTier      NVARCHAR(20)     NULL,
     RelationshipType    NVARCHAR(50)     NULL,
 
+    -- Process 4 — Analysis & Intelligence
+    CriScore            INT              NULL,
+    HealthBand          NVARCHAR(20)     NULL,
+    VendorState         NVARCHAR(20)     NULL,
+    LastAnalysedAt      DATETIME2(7)     NULL,
+
     -- Audit
     CreatedAt           DATETIME2(7)     NOT NULL  DEFAULT GETUTCDATE(),
     UpdatedAt           DATETIME2(7)     NOT NULL  DEFAULT GETUTCDATE(),
@@ -163,6 +169,8 @@ CREATE INDEX IX_VI_ProfileStatus  ON VendorIntelligence (ProfileStatus)
     WHERE ProfileStatus IS NOT NULL;    -- Filtered: only rows with enrichment data
 CREATE INDEX IX_VI_DependencyTier ON VendorIntelligence (DependencyTier)
     WHERE DependencyTier IS NOT NULL;   -- Filtered: only rows with P3 classification
+CREATE INDEX IX_VI_HealthBand     ON VendorIntelligence (HealthBand)
+    WHERE HealthBand IS NOT NULL;       -- Filtered: only rows with P4 analysis data
 ```
 
 ### Column Reference — Identity Group
@@ -198,7 +206,7 @@ Written when `entity.md` is first created by P1. Reflects the outcome of entity 
 | `IdentityConfidence` | DECIMAL(4,3) | NOT NULL | 0.000–1.000 confidence score from `entity_resolution`. Represents certainty that the resolved identity correctly matches the input name. Used to route borderline cases to triage. |
 | `Category` | NVARCHAR(100) | NULL | Primary spend category (e.g., `IT_SERVICES`, `PROFESSIONAL_SERVICES`, `FACILITIES`). Used for dashboard grouping, risk segmentation, and classifier signal. May be updated by P2 enrichment. |
 | `Tier` | NVARCHAR(10) | NULL | Strategic tier set by user or inferred: `TIER_1` / `TIER_2` / `TIER_3`. TIER_1 vendors receive priority scheduling — they sort first in the `get_due_vendors` query. |
-| `PcsScore` | INT | NOT NULL | Profile Completeness Score (0–100). Composite metric summed across processes: P1 contributes max 53, P2 contributes max 47, P3 contributes max 20. Total clamped at 100. Drives dashboard health indicators and highlights under-documented vendors. |
+| `PcsScore` | INT | NOT NULL | Profile Completeness Score (0–100). Composite metric summed across processes: P1 contributes max 53, P2 contributes max 47, P3 contributes max 20, P4 contributes max 10. Total clamped at 100. Drives dashboard health indicators and highlights under-documented vendors. |
 | `VifGenerated` | BIT | NOT NULL | Whether the Vendor Intelligence File (VIF) PDF/report has been generated and delivered for this vendor. Used by reporting to identify vendors awaiting their VIF. |
 
 ### Column Reference — P2 Enrichment Group
@@ -224,6 +232,17 @@ Written when `relationship_spend_profile.md` is created by P3. Null until P3 run
 | `SpendTotalUsd` | DECIMAL(18,2) | NULL | Trailing 12-month (TTM) spend in USD from P3 aggregation. Stored here for fast dashboard spend totals without reading blob files. Null means no spend data collected. |
 | `DependencyTier` | NVARCHAR(20) | NULL | P3 dependency classification: `CRITICAL` / `HIGH` / `MEDIUM` / `LOW`. Used for risk dashboards, escalation rules, and VW Agent scheduling priority. |
 | `RelationshipType` | NVARCHAR(50) | NULL | P3 relationship classification: `STRATEGIC` / `PREFERRED` / `TRANSACTIONAL` / `INCIDENTAL` / `UNKNOWN`. Primary signal used by VW Agent for scheduling and escalation decisions. |
+
+### Column Reference — P4 Analysis & Intelligence Group
+
+Written when `analysis_result.md` is created by P4. Null until P4 runs.
+
+| Column | Type | Nullable | Purpose |
+|---|---|---|---|
+| `CriScore` | INT | NULL | Composite Relationship Intelligence score 0–100. Computed by scoring_engine as a weighted average of 5 dimension scores (Delivery Reliability 20% + Responsiveness 20% + Commercial Value 20% + Risk & Compliance 20% + Relationship Trend 20%). Null means P4 has not run. |
+| `HealthBand` | NVARCHAR(20) | NULL | CRI health classification: `HEALTHY` (≥80) / `WATCH` (≥65) / `AT_RISK` (≥50) / `CRITICAL` (<50). Used by dashboards, VW Agent scheduling, and escalation rules. Null means P4 has not run. |
+| `VendorState` | NVARCHAR(20) | NULL | Compound state from state_classifier combining CRI, trend direction, and renewal proximity: `HEALTHY` / `WATCH` / `AT_RISK` / `CRITICAL` / `UNKNOWN` / `ARCHIVED`. Differs from HealthBand — renewal proximity within 30 days can elevate state one band above HealthBand. |
+| `LastAnalysedAt` | DATETIME2(7) | NULL | UTC timestamp of last successful P4 analysis run. Used by the P4 freshness gate: vendors analysed within 30 days are skipped unless force=True. Null means P4 has never run. |
 
 ### Column Reference — Audit Group
 
@@ -361,7 +380,7 @@ CREATE INDEX IX_WorkflowIndex_UserId      ON WorkflowIndex (UserId);
 | `ProgrammeId` | NVARCHAR(50) | NOT NULL | Which programme this workflow belongs to. |
 | `UserId` | NVARCHAR(50) | NOT NULL | Denormalised for fast per-user workflow listing without joining. |
 | `VendorId` | NVARCHAR(50) | NULL | Which vendor this workflow is for. Null for programme-level workflows (e.g., intake batch workflows). |
-| `WorkflowType` | NVARCHAR(50) | NOT NULL | `INTAKE_INVESTIGATION` / `ENRICHMENT` / `RS_DATA_GATHERING`. Determines which tool registry is used. |
+| `WorkflowType` | NVARCHAR(50) | NOT NULL | `INTAKE_INVESTIGATION` / `ENRICHMENT` / `RS_DATA_GATHERING` / `ANALYSIS`. Determines which tool registry is used. |
 | `Status` | NVARCHAR(20) | NOT NULL | `NOT_STARTED` / `IN_PROGRESS` / `COMPLETED` / `FAILED` / `BLOCKED`. Used by observability dashboard and crash recovery scanner. |
 | `CurrentStepId` | NVARCHAR(20) | NULL | The step currently executing (e.g., `s3_aggregate`). Updated at each step transition. Used for live progress display. |
 | `Version` | INT | NOT NULL | Incremented each time the Planning Agent replans this workflow. Crash recovery always loads the latest version. |
@@ -384,6 +403,7 @@ All workspace file writes go through `atomic_write()`, which calls `sync_to_db()
 | `action_queue.md` | VendorIntelligence | UPDATE | Status, NextActionDue, LastRunAt, UpdatedAt |
 | `vendor_profile.md` | VendorIntelligence | UPDATE | Category, Subcategory, VendorType, HqCountry, CompanySizeBand, ProfileStatus, LastEnrichedAt, UpdatedAt |
 | `relationship_spend_profile.md` | VendorIntelligence | UPDATE | RsLastUpdated, SpendTotalUsd, DependencyTier, RelationshipType, UpdatedAt |
+| `analysis_result.md` | VendorIntelligence | UPDATE | CriScore, HealthBand, VendorState, LastAnalysedAt, UpdatedAt |
 | `workflow.json` (V2) | WorkflowIndex | UPSERT | WorkflowId, ProgrammeId, UserId, VendorId, WorkflowType, Status, Version, ReplanningCount, LastUpdated, WorkflowBlobPath |
 | `state.json` (V2) | WorkflowIndex | UPDATE | Status, CurrentStepId, LastUpdated |
 
@@ -453,6 +473,33 @@ WHERE ProgrammeId = @programme_id
   );
 ```
 
+### Vendors Needing Re-analysis — `get_vendors_needing_analysis`
+
+Finds vendors whose P4 analysis is absent or stale (older than 30 days).
+Only runs on vendors where P3 is complete (RelationshipType is not null).
+
+```sql
+SELECT VendorId FROM VendorIntelligence
+WHERE ProgrammeId = @programme_id
+  AND RelationshipType IS NOT NULL
+  AND (
+      LastAnalysedAt IS NULL
+      OR LastAnalysedAt < DATEADD(day, -30, GETUTCDATE())
+  );
+```
+
+### Vendors by Health Band — `get_vendors_by_health`
+
+Returns all vendors in a given health band for dashboard display and escalation routing.
+
+```sql
+SELECT VendorId, VendorName, CriScore, HealthBand, VendorState, LastAnalysedAt
+FROM VendorIntelligence
+WHERE ProgrammeId = @programme_id
+  AND HealthBand = @health_band
+ORDER BY CriScore ASC;   -- Worst performers first within band
+```
+
 ### Overdue Triage SLA Items — `get_overdue_triage`
 
 Returns all pending triage items past their SLA deadline for a user. Uses the filtered index on `Status = 'PENDING'`.
@@ -489,7 +536,7 @@ No foreign key constraints are enforced. The database is a projection layer — 
 
 Run in order: UserAccount → ProgrammeRun → VendorIntelligence → VendorCheckin → TriageItem.
 
-The `VendorIntelligence` V1 baseline includes only the columns that exist in the current `models.py` plus the new `UserId` column. P2 and P3 column groups are added in subsequent migrations.
+The `VendorIntelligence` V1 baseline includes only the columns that exist in the current `models.py` plus the new `UserId` column. P2, P3, and P4 column groups are added in subsequent migrations.
 
 ### V2 Enrichment Migration — Add P2 Columns
 
@@ -524,3 +571,20 @@ ADD RsLastUpdated    DATETIME2(7)  NULL,
 ```
 
 **Note:** The `sync_to_db()` handler for `relationship_spend_profile.md` must be deployed before running this migration, or the columns will remain null after P3 runs.
+
+### P4 Migration — Add Analysis & Intelligence Columns
+
+After P4 tooling is deployed:
+
+```sql
+ALTER TABLE VendorIntelligence
+ADD CriScore        INT           NULL,
+    HealthBand      NVARCHAR(20)  NULL,
+    VendorState     NVARCHAR(20)  NULL,
+    LastAnalysedAt  DATETIME2(7)  NULL;
+
+CREATE INDEX IX_VI_HealthBand ON VendorIntelligence (HealthBand)
+    WHERE HealthBand IS NOT NULL;
+```
+
+**Note:** The `sync_to_db()` handler for `analysis_result.md` must be deployed before running this migration, or the columns will remain null after P4 runs. This follows the same pattern as the P3 migration.

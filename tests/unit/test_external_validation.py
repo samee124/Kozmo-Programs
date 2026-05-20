@@ -74,8 +74,13 @@ def make_plan(steps: list[str], **overrides) -> InvestigationPlan:
     return InvestigationPlan(**defaults)
 
 
-# ResearchAgent with no BRAVE_API_KEY → web_research always returns ""
-_ra = ResearchAgent()
+class _StubRA(ResearchAgent):
+    """Stub that always returns empty web results (no API keys in test env)."""
+    def web_research(self, vendor_name, tier="STANDARD", country_hint=None):
+        return ""
+
+
+_ra = _StubRA()
 
 
 # ---------------------------------------------------------------------------

@@ -74,8 +74,10 @@ def test_skip_tier_returns_empty():
     assert result == ""
 
 
-def test_no_api_key_returns_empty(monkeypatch):
+def test_no_api_key_returns_empty(monkeypatch, tmp_path):
     monkeypatch.delenv("BRAVE_API_KEY", raising=False)
+    monkeypatch.setenv("SEARCH_CACHE_DIR", str(tmp_path))  # empty cache — no stale hits
+    monkeypatch.setattr(ra_module, "DDGS", None)  # disable DDG fallback
     result = agent.web_research("IBM", tier="FAST")
     assert result == ""
 
