@@ -18,7 +18,7 @@ from cobalt.orchestrator.enrichment_orchestrator import enrich_all_confirmed
 from cobalt.orchestrator.rs_orchestrator import run_rs_all_confirmed
 from cobalt.db.queries import insert_user, insert_programme
 
-PROGRAMME      = "nova-2026"
+PROGRAMME      = "Sales-02"
 USER_ID        = os.getenv("COBALT_USER_ID", "user001")
 DOCUMENTS_PATH = "C:\\Users\\Admin\\Downloads\\sales-force-program"
 
@@ -32,7 +32,7 @@ insert_user(
 insert_programme(
     programme_id=PROGRAMME,
     user_id=USER_ID,
-    programme_name="Nova 2026 Vendor Programme",
+    programme_name="Sales 02 Vendor Programme",
 )
 
 # Step 1 — Intake

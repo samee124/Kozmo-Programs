@@ -18,6 +18,7 @@ from sqlalchemy.orm import sessionmaker, Session
 
 from cobalt.core.file_system import read_md
 from cobalt.db.models import ProgrammeRun, VendorIntelligence
+from cobalt.db.queries import insert_vendor
 
 load_dotenv()
 
@@ -177,6 +178,51 @@ def _sync_triage_queue(session: Session, data: dict, vendor_id: str) -> None:
     )
 
 
+def _sync_single_vendor_file(session: Session, data: dict, vendor_id: str, programme_id: str) -> None:
+    """Single-file vendor .md written → ensure row exists, then update all known columns.
+
+    Single-file arch writes {slug}.md at the vendor root. This handler fires for
+    any .md file whose name is not in the named-file registry, ensuring the
+    VendorIntelligence row is created (idempotent) before the UPDATE runs.
+    """
+    # Ensure row exists — idempotent, safe to call on every write.
+    insert_vendor(
+        vendor_id=vendor_id,
+        programme_id=programme_id,
+        vendor_name=data.get("vendor_name") or data.get("input_name") or vendor_id,
+        input_name=data.get("input_name") or vendor_id,
+        user_id=data.get("user_id") or os.getenv("COBALT_USER_ID"),
+        data_class=data.get("data_class", "CLASS_D"),
+        identity_confidence=float(data.get("identity_confidence") or 0.0),
+    )
+
+    values: dict = {"updated_at": datetime.utcnow()}
+    _maybe = lambda k, v: values.update({k: v}) if v is not None else None
+
+    _maybe("vendor_name",        data.get("vendor_name") or data.get("input_name"))
+    _maybe("data_class",         data.get("data_class"))
+    _maybe("identity_confidence",float(data.get("identity_confidence") or 0.0) if data.get("identity_confidence") is not None else None)
+    _maybe("category",           data.get("category"))
+    _maybe("subcategory",        data.get("subcategory"))
+    _maybe("vendor_type",        data.get("vendor_type"))
+    _maybe("hq_country",         data.get("hq_country"))
+    _maybe("company_size_band",  data.get("company_size_band"))
+    _maybe("profile_status",     data.get("profile_status"))
+    _maybe("last_enriched_at",   _parse_datetime(data.get("enriched_at") or data.get("last_enriched_at")))
+    _maybe("status",             data.get("status") or data.get("intake_status"))
+    _maybe("spend_total_usd",    data.get("spend_total_ttm_usd"))
+    _maybe("dependency_tier",    data.get("dependency_tier"))
+    _maybe("relationship_type",  data.get("relationship_type"))
+    _maybe("rs_last_updated",    _parse_datetime(data.get("rs_last_updated")))
+
+    session.execute(
+        update(VendorIntelligence)
+        .where(VendorIntelligence.vendor_id == vendor_id)
+        .where(VendorIntelligence.programme_id == programme_id)
+        .values(**values)
+    )
+
+
 # ─── Handler registry ─────────────────────────────────────────────────────────
 
 _HANDLERS = {
@@ -206,7 +252,13 @@ def sync_to_db(
         programme_id: Programme identifier.
     """
     handler = _HANDLERS.get(path.name)
-    if handler is None:
+    is_single_vendor_file = (
+        handler is None
+        and vendor_id is not None
+        and programme_id is not None
+        and path.suffix == ".md"
+    )
+    if handler is None and not is_single_vendor_file:
         logger.debug("sync_to_db: no handler for %s — skipping", path.name)
         return
 
@@ -224,7 +276,10 @@ def sync_to_db(
 
     try:
         with factory() as session:
-            handler(session, data, vendor_id)
+            if is_single_vendor_file:
+                _sync_single_vendor_file(session, data, vendor_id, programme_id)
+            else:
+                handler(session, data, vendor_id)
             session.commit()
     except Exception as exc:
         logger.warning("sync_to_db: DB error for %s: %s", path, exc)
