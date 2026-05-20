@@ -35,7 +35,10 @@ def programme_path(programme_id: str) -> Path:
 
 
 def entity_path(programme_id: str, vendor_id: str) -> Path:
-    """Return the path to entity.md for a vendor."""
+    """Return the vendor workspace .md file path (single-file arch), or identity/entity.md fallback."""
+    found = _find_vendor_file(programme_id, vendor_id)
+    if found is not None:
+        return found
     return vendor_path(programme_id, vendor_id) / "identity" / "entity.md"
 
 

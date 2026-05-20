@@ -13,6 +13,7 @@ In both modes, sync_to_db() is called explicitly after the write completes.
 import json
 import logging
 import os
+import time
 from pathlib import Path
 from typing import Callable
 
@@ -209,7 +210,16 @@ def atomic_write(
             tmp_path.unlink(missing_ok=True)
             raise SchemaValidationError(str(exc)) from exc
 
-    tmp_path.replace(path)
+    # Retry replace on Windows PermissionError (antivirus briefly locks .tmp files)
+    for _attempt in range(4):
+        try:
+            tmp_path.replace(path)
+            break
+        except PermissionError:
+            if _attempt == 3:
+                tmp_path.unlink(missing_ok=True)
+                raise
+            time.sleep(0.05 * (2 ** _attempt))  # 50ms, 100ms, 200ms
 
     _upload_to_blob(path, serialised, vendor_id, programme_id, user_id)
     _call_sync_to_db(path, vendor_id, programme_id)
