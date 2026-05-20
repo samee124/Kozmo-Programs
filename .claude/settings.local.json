@@ -34,7 +34,13 @@
       "Bash(python -m pytest tests/tools/test_scoring_engine.py -x -q)",
       "Bash(python -m pytest tests/tools/test_commercial_analyser.py -x -q --tb=short)",
       "Bash(python -m pytest tests/tools/test_trend_analyser.py -x -q --tb=short)",
-      "Bash(python -c \"from cobalt.tools.inquiry_engine import run_inquiry; from cobalt.tools.finding_engine import detect_findings; from cobalt.tools.narrative_engine import generate_narratives; print\\('All imports OK'\\)\")"
+      "Bash(python -c \"from cobalt.tools.inquiry_engine import run_inquiry; from cobalt.tools.finding_engine import detect_findings; from cobalt.tools.narrative_engine import generate_narratives; print\\('All imports OK'\\)\")",
+      "Bash(git fetch *)",
+      "Bash(git pull *)",
+      "Bash(python -m pytest tests/orchestrator/test_analysis_orchestrator.py::TestGateChecksSkipped::test_fresh_analysis_skipped -x -q --tb=long)",
+      "Bash(git add *)",
+      "Bash(git rm *)",
+      "Bash(git commit -m ' *)"
     ]
   }
 }
