@@ -32,6 +32,22 @@ These names match the design spreadsheet exactly. Never rename them.
   Tool 4 P3: relationship_classifier      → src/cobalt/tools/relationship_classifier.py
   Tool 5 P3: rs_profile_assembler         → src/cobalt/tools/rs_profile_assembler.py
 
+## The Seven Process 4 Tools — Names Are Fixed
+  Tool 1 P4: evidence_validator           → src/cobalt/tools/evidence_validator.py
+  Tool 2 P4: scoring_engine               → src/cobalt/tools/scoring_engine.py
+  Tool 3 P4: commercial_analyser          → src/cobalt/tools/commercial_analyser.py
+  Tool 4 P4: trend_analyser               → src/cobalt/tools/trend_analyser.py
+  Tool 5 P4: inquiry_engine               → src/cobalt/tools/inquiry_engine.py
+  Tool 6 P4: finding_engine               → src/cobalt/tools/finding_engine.py
+  Tool 7 P4: narrative_engine             → src/cobalt/tools/narrative_engine.py
+
+  Execution order is STRICT and enforced by analysis_orchestrator:
+    evidence_validator → commercial_analyser → inquiry_engine →
+    scoring_engine → trend_analyser → finding_engine → narrative_engine
+
+  signal_processor does not exist yet.
+  All P4 tools accept signal_bundle=None. Handle gracefully — no crash.
+
 ## Directory Structure
 src/cobalt/
   core/           exceptions, llm_call, atomic_write, file_system
@@ -125,6 +141,61 @@ STATE → ANALYZE → PLAN → EXECUTE → NEW STATE → REPEAT
 | Tool 4 P3: relationship_classifier | specs/07_rs_tools/relationship_classifier_spec.md    |
 | Tool 5 P3: rs_profile_assembler    | specs/07_rs_tools/rs_profile_assembler_spec.md       |
 | P3 pipeline orchestrator           | specs/07_rs_tools/rs_pipeline_spec.md                |
+| P4 schemas                         | specs/10_analysis_intelligence/an_schema_spec.md     |
+| P4 shared utilities                | specs/10_analysis_intelligence/an_shared_utilities_spec.md |
+| P4 DB additions                    | specs/10_analysis_intelligence/an_db_additions_spec.md |
+| Tool 1 P4: evidence_validator      | specs/10_analysis_intelligence/evidence_validator_spec.md |
+| Tool 2 P4: scoring_engine          | specs/10_analysis_intelligence/scoring_engine_spec.md |
+| Tool 3 P4: commercial_analyser     | specs/10_analysis_intelligence/commercial_analyser_spec.md |
+| Tool 4 P4: trend_analyser          | specs/10_analysis_intelligence/trend_analyser_spec.md |
+| Tool 5 P4: inquiry_engine          | specs/10_analysis_intelligence/inquiry_engine_spec.md |
+| Tool 6 P4: finding_engine          | specs/10_analysis_intelligence/finding_engine_spec.md |
+| Tool 7 P4: narrative_engine        | specs/10_analysis_intelligence/narrative_engine_spec.md |
+| P4 pipeline orchestrator           | specs/10_analysis_intelligence/analysis_orchestrator_spec.md |
+| P4 integration test                | specs/10_analysis_intelligence/an_integration_test_spec.md |
+
+## Process 4 — Analysis & Intelligence
+
+### P4 gate rules (checked by analysis_orchestrator before running)
+  1. entity.md must exist with status = CONFIRMED
+  2. relationship_spend_profile.md must exist (P3 must be complete)
+  3. Skip if last_analysed_at < 30 days ago (unless force=True)
+  4. vendor_profile.md missing → warn only, do not block
+
+### P4 LLM usage per tool
+  evidence_validator:  0 calls — pure quality checks, no LLM
+  scoring_engine:      0 calls — arithmetic, no LLM
+  commercial_analyser: 0–3 calls (contract type when ambiguous,
+                         renewal scenarios, spend narrative >15% variance)
+  trend_analyser:      0–1 calls (action learning insight when >= 3 actions)
+  inquiry_engine:      6–12 calls (one per question, tiered Q&A)
+  finding_engine:      0–1 calls (severity calibration when >= 3 HIGH findings)
+  narrative_engine:    2 calls (batch 1: findings + vendor summary;
+                         batch 2: commercial + Q&A summaries)
+  All LLM failures: return degraded-but-non-null output. Never raise.
+
+### P4 workspace outputs (written by analysis_orchestrator only)
+  workspace/{programme_id}/{vendor_id}/analysis_result.md
+  workspace/{programme_id}/{vendor_id}/history/score_history.json
+  workspace/{programme_id}/{vendor_id}/history/qa_history.json
+  workspace/{programme_id}/{vendor_id}/history/evidence_state.json
+  workspace/{programme_id}/{vendor_id}/history/commercial_state.json
+  programme_run/analysis_log.md   (one row per vendor, appended)
+
+### P4 DB sync (analysis_orchestrator writes after each completed run)
+  analysis_result.md → VendorIntelligence:
+    CriScore        ← score_bundle.cri_score
+    HealthBand      ← score_bundle.health_band
+    VendorState     ← state_classifier.classify_vendor_state(...)
+    LastAnalysedAt  ← now (UTC)
+
+### P4 new core skills (src/cobalt/core/)
+  pcs.py              — compute_pcs() — P4 PCS contribution (max 0.10)
+  triage.py           — generate_triage_tasks(), build_triage_task()
+  state_classifier.py — classify_vendor_state()
+                        → HEALTHY / WATCH / AT_RISK / CRITICAL / UNKNOWN / ARCHIVED
+  Note: confidence_scorer.py, gap_analyzer.py, staleness.py already exist from P3.
+  Do not recreate them.
 
 ## Ten Non-Negotiable Rules
 1. VW Agent is the ONLY writer to vendor workspace files after intake.
@@ -163,11 +234,12 @@ V1 BUILD NOW:
   src/cobalt/models/schemas/
   src/cobalt/intake/          (private helpers: _cleaner, _normalizer,
                                _signal_collector, _executor, steps/)
-  src/cobalt/tools/           (THE FIVE NAMED TOOLS)
+  src/cobalt/tools/           (P1 five tools + P3 five tools + P4 seven tools)
   src/cobalt/agents/
   src/cobalt/orchestrator/
   src/cobalt/workspace/
   tests/
+  specs/10_analysis_intelligence/   (P4 spec files — read before building P4)
 
 V2 DO NOT BUILD:
   Real sanctions API, real registry connectors, Azure Functions,

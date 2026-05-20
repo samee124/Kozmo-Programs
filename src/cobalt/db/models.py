@@ -166,6 +166,12 @@ class VendorIntelligence(Base):
         "RelationshipType", String(50), nullable=True
     )
 
+    # Process 4 — Analysis & Intelligence (null until P4 runs)
+    cri_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    health_band: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    vendor_state: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    last_analysed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+
     # Audit
     created_at: Mapped[datetime] = mapped_column(
         "CreatedAt", DateTime, server_default=func.now()

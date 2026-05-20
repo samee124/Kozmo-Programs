@@ -35,11 +35,18 @@ def programme_path(programme_id: str) -> Path:
 
 
 def entity_path(programme_id: str, vendor_id: str) -> Path:
-    """Return the vendor workspace .md file path (single-file arch), or identity/entity.md fallback."""
+    """Return the path to entity.md for a vendor.
+
+    Multi-file arch (identity/entity.md) takes priority; single-file arch
+    fallback searches the vendor root for any .md file.
+    """
+    standard = vendor_path(programme_id, vendor_id) / "identity" / "entity.md"
+    if standard.exists():
+        return standard
     found = _find_vendor_file(programme_id, vendor_id)
     if found is not None:
         return found
-    return vendor_path(programme_id, vendor_id) / "identity" / "entity.md"
+    return standard
 
 
 def coverage_path(programme_id: str, vendor_id: str) -> Path:
