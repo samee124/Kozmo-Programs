@@ -86,12 +86,17 @@ def _check_immutability(path: Path, new_content: dict) -> None:
 
 
 def _call_sync_to_db(path: Path, vendor_id: str | None, programme_id: str | None) -> None:
-    """Call sync_to_db() if vendor_id and programme_id are provided.
+    """Call sync_to_db() if programme_id is provided.
+
+    vendor_id may be None for programme-level files (deduplication_report.md,
+    vendor_register.md, run_log.md, triage_queue.md, programme_plan.md).
+    sync_to_db() uses named handlers that read programme_id from the file data,
+    so vendor_id is not required for those paths.
 
     Failures are logged as warnings — never re-raised.
     DB is projection only; a sync failure must not block the write.
     """
-    if not vendor_id or not programme_id:
+    if not programme_id:
         return
     try:
         from cobalt.db.sync_to_db import sync_to_db

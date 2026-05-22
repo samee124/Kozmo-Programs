@@ -23,12 +23,11 @@ import yaml
 
 from cobalt.core.atomic_write import append_md, atomic_write
 from cobalt.core.file_system import (
+    _find_vendor_file,
     entity_path,
     ledger_path,
     programme_run_path,
-    rs_profile_path,
     vendor_path,
-    vendor_profile_path,
 )
 from cobalt.core.pcs import compute_pcs
 from cobalt.core.staleness import is_stale
@@ -100,11 +99,12 @@ def _load_history_json(path: Path, cls):
 
 
 def _read_pcs(programme_id: str, vendor_id: str) -> float:
-    """Read current PCS from rs_profile frontmatter. Returns 0.0 if unavailable."""
-    rp = rs_profile_path(programme_id, vendor_id)
-    if rp.exists():
-        data = _read_md_frontmatter(rp)
-        val = data.get("pcs_total")
+    """Read current PCS from consolidated profile's relationship: key. Returns 0.0 if unavailable."""
+    vf = _find_vendor_file(programme_id, vendor_id)
+    if vf and vf.exists():
+        data = _read_md_frontmatter(vf)
+        rel = data.get("relationship") or {}
+        val = rel.get("pcs_total")
         if val is not None:
             return float(val)
     return 0.0
@@ -135,15 +135,16 @@ def _default_scoring_config() -> ScoringConfig:
 
 
 def _load_rs_profile_object(programme_id: str, vendor_id: str):
-    """Load relationship_spend_profile.md and return a RelationshipSpendProfile.
+    """Load relationship data from the consolidated profile and return a RelationshipSpendProfile.
 
-    Contract terms are not stored in the .md frontmatter — defaults to [].
-    Relationship classification fields are reconstructed from flat frontmatter keys.
+    Contract terms are not stored in the frontmatter — defaults to [].
+    Relationship classification fields are reconstructed from the relationship: key.
     """
     from cobalt.models.schemas.rs_schema import RelationshipSpendProfile
 
-    rp_path = rs_profile_path(programme_id, vendor_id)
-    data = _read_md_frontmatter(rp_path) if rp_path.exists() else {}
+    vf_path = _find_vendor_file(programme_id, vendor_id)
+    all_data = _read_md_frontmatter(vf_path) if vf_path and vf_path.exists() else {}
+    data = all_data.get("relationship") or {}
 
     full_data = {
         "vendor_id":       data.get("vendor_id") or vendor_id,
@@ -193,9 +194,13 @@ def _check_gates(
 ) -> ANRunResult | None:
     """Run gate checks in order. Returns ANRunResult if run should abort, else None."""
 
-    # Gate 1: entity.md must exist with CONFIRMED status
+    # Gate 1: vendor workspace file must exist.
+    # Status is NOT checked strictly here — after P1 enrichment the status
+    # becomes PARTIALLY_ENRICHED / ENRICHED, but the vendor is already
+    # confirmed by being in vendor_register.md. Only block explicit failures.
     ep = entity_path(programme_id, vendor_id)
     if not ep.exists():
+        logger.warning("Gate 1 BLOCKED: no entity file for %s/%s", programme_id, vendor_id)
         return ANRunResult(
             vendor_id=vendor_id, programme_id=programme_id,
             status=ANRunStatus.BLOCKED.value,
@@ -203,13 +208,23 @@ def _check_gates(
             finding_count=0, nba_action=None,
             pcs_before=None, pcs_after=None,
             tools_run=[], skip_reason=None,
-            error="entity_not_confirmed",
+            error="entity_file_missing",
             analysed_at=_now_iso(),
         )
 
-    entity_data = _read_md_frontmatter(ep)
-    intake_status = (entity_data.get("intake") or {}).get("status") or entity_data.get("status", "")
-    if intake_status.upper() != "CONFIRMED":
+    entity_data = _read_md_frontmatter(ep) or {}
+    # Block unconfirmed/failed intake statuses.
+    # Reads intake.status (single-file arch), intake_status (old multi-file), and
+    # top-level status (old entity.md arch where status=CONFIRMED/PENDING).
+    # Does NOT block PARTIALLY_ENRICHED/ENRICHED — those are post-intake statuses.
+    _BLOCKED_STATUSES = frozenset({"TRIAGE", "DISCARDED", "FAILED", "BLOCKED", "PENDING"})
+    raw_status = (
+        (entity_data.get("intake") or {}).get("status")
+        or entity_data.get("intake_status")
+        or entity_data.get("status", "")
+    )
+    if raw_status and raw_status.upper() in _BLOCKED_STATUSES:
+        logger.warning("Gate 1 BLOCKED: vendor %s has intake status %s", vendor_id, raw_status)
         return ANRunResult(
             vendor_id=vendor_id, programme_id=programme_id,
             status=ANRunStatus.BLOCKED.value,
@@ -217,13 +232,25 @@ def _check_gates(
             finding_count=0, nba_action=None,
             pcs_before=None, pcs_after=None,
             tools_run=[], skip_reason=None,
-            error="entity_not_confirmed",
+            error=f"intake_status_{raw_status.lower()}",
             analysed_at=_now_iso(),
         )
 
-    # Gate 2: RS profile must exist (P3 must be complete)
-    rp = rs_profile_path(programme_id, vendor_id)
-    if not rp.exists():
+    # Gate 2: consolidated profile must have relationship: data (P3 must be complete)
+    profile_path = _find_vendor_file(programme_id, vendor_id)
+    if profile_path is None or not profile_path.exists():
+        return ANRunResult(
+            vendor_id=vendor_id, programme_id=programme_id,
+            status=ANRunStatus.BLOCKED.value,
+            cri_score=None, health_band=None,
+            finding_count=0, nba_action=None,
+            pcs_before=None, pcs_after=None,
+            tools_run=[], skip_reason=None,
+            error="rs_profile_missing",
+            analysed_at=_now_iso(),
+        )
+    profile_data = _read_md_frontmatter(profile_path)
+    if not profile_data.get("relationship"):
         return ANRunResult(
             vendor_id=vendor_id, programme_id=programme_id,
             status=ANRunStatus.BLOCKED.value,
@@ -235,10 +262,10 @@ def _check_gates(
             analysed_at=_now_iso(),
         )
 
-    # Gate 3: vendor_profile.md missing → warn only, do not block
-    if not vendor_profile_path(programme_id, vendor_id).exists():
+    # Gate 3: enrichment data missing → warn only, do not block.
+    if not profile_data.get("enrichment"):
         logger.warning(
-            "vendor_profile.md missing for %s/%s — continuing without P2 data",
+            "enrichment data missing for %s/%s — continuing without P2 data",
             programme_id, vendor_id,
         )
 
@@ -860,6 +887,19 @@ def run_analysis(
     return result
 
 
+def _read_vendor_ids_from_register(programme_id: str) -> list[str]:
+    """Read vendor IDs from vendor_register.md (filesystem, same as RS/enrichment orchestrators)."""
+    from cobalt.core.file_system import programme_run_path, read_md
+    register_path = programme_run_path(programme_id) / "vendor_register.md"
+    if not register_path.exists():
+        return []
+    data = read_md(register_path)
+    if not data:
+        return []
+    vendors = data.get("vendors") or []
+    return [str(v["vendor_id"]) for v in vendors if v.get("vendor_id")]
+
+
 def run_analysis_all_confirmed(
     programme_id: str,
     **kwargs,
@@ -867,16 +907,22 @@ def run_analysis_all_confirmed(
     """Run Process 4 for every CONFIRMED vendor in the programme.
 
     Sequential. A failure on one vendor does not affect others.
+    Reads vendor IDs from vendor_register.md; falls back to DB if empty.
     """
-    try:
-        from cobalt.db.queries import get_confirmed_vendors
-        vendor_ids = get_confirmed_vendors(programme_id)
-    except Exception as exc:
-        logger.warning("Could not query confirmed vendors for %s: %s", programme_id, exc)
-        vendor_ids = []
+    vendor_ids = _read_vendor_ids_from_register(programme_id)
+    if not vendor_ids:
+        try:
+            from cobalt.db.queries import get_confirmed_vendors
+            vendor_ids = get_confirmed_vendors(programme_id)
+        except Exception as exc:
+            logger.warning("Could not query confirmed vendors for %s: %s", programme_id, exc)
+            vendor_ids = []
+
+    logger.info("Analysis pipeline: processing %d vendors for programme %s", len(vendor_ids), programme_id)
 
     results: list[ANRunResult] = []
-    for vendor_id in vendor_ids:
+    for idx, vendor_id in enumerate(vendor_ids, start=1):
+        logger.info("[%d/%d] Analysis processing %s ...", idx, len(vendor_ids), vendor_id)
         result = run_analysis(vendor_id, programme_id, **kwargs)
         results.append(result)
 

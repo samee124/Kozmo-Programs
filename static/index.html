@@ -1,0 +1,832 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=1440">
+<title>Cobalt — Vendor Intelligence</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@300;400;500;600;700&family=Geist+Mono:wght@400;500&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet">
+<script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+<style>
+  :root {
+    --bg: #f6f4ee;
+    --bg-2: #efece4;
+    --surface: #ffffff;
+    --surface-2: #faf8f3;
+    --line: #e2ddd0;
+    --line-2: #d6cfbd;
+    --ink: #1a1a17;
+    --ink-2: #3c3a33;
+    --ink-3: #6b6759;
+    --ink-4: #93907f;
+    --accent: #1f3a8a;
+    --accent-2: #2748a8;
+    --accent-soft: #e6eaf5;
+    --ok: #2f6b3a;
+    --ok-soft: #e2eee0;
+    --warn: #8a5a14;
+    --warn-soft: #f1e5cf;
+    --err: #8a2f2a;
+    --err-soft: #f1dcd9;
+    --info: #2a5e8a;
+    --info-soft: #dde7ef;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0; height: 100%;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: 'Geist', -apple-system, BlinkMacSystemFont, sans-serif;
+    font-size: 14px;
+    line-height: 1.45;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+  #root { height: 100%; }
+  button { font-family: inherit; }
+  ::selection { background: var(--accent); color: #fff; }
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-thumb { background: #d3cdbd; border-radius: 10px; border: 2px solid var(--bg); }
+  ::-webkit-scrollbar-track { background: transparent; }
+
+  @keyframes caret { 0%,49%{opacity:1}50%,100%{opacity:0} }
+  .caret::after { content:"▍"; margin-left:2px; animation:caret 1s steps(1) infinite; color:#8aa6c9 }
+
+  @keyframes spin { to { transform:rotate(360deg) } }
+  .spin { animation:spin 0.9s linear infinite }
+
+  @keyframes pulse { 0%,100%{opacity:1}50%{opacity:0.35} }
+  .pulse { animation:pulse 1.4s ease-in-out infinite }
+
+  @keyframes shimmer { from{background-position:0 0}to{background-position:40px 0} }
+  .shimmer {
+    background-image: linear-gradient(45deg, var(--accent) 25%, var(--accent-2) 25%, var(--accent-2) 50%, var(--accent) 50%, var(--accent) 75%, var(--accent-2) 75%);
+    background-size: 18px 18px;
+    animation: shimmer 1.2s linear infinite;
+  }
+
+  @keyframes drawerIn { from{transform:translateX(40px);opacity:0}to{transform:translateX(0);opacity:1} }
+  @keyframes overlayIn { from{opacity:0}to{opacity:1} }
+  .drawer-overlay { animation:overlayIn .18s ease-out }
+  .drawer-panel { animation:drawerIn .22s cubic-bezier(.2,.7,.2,1) }
+
+  .vendor-tile { transition:transform .15s ease,box-shadow .15s ease,border-color .15s ease,background .15s ease; }
+  .vendor-tile:hover { transform:translateY(-2px);border-color:var(--line-2);box-shadow:0 4px 16px -8px rgba(26,26,23,0.18);background:#fff; }
+
+  .prog-item { transition:background .12s ease,color .12s ease }
+  .prog-item:hover { background:rgba(0,0,0,0.04) }
+  .prog-item.active { background:rgba(31,58,138,0.07);color:var(--ink) }
+  .prog-item.active .prog-meta { color:var(--ink-3) }
+
+  @keyframes fadeUp { from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)} }
+  .fade-up { animation:fadeUp .35s ease both }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script>
+const { useState, useEffect, useRef, useMemo } = React;
+
+/* ── Icons ───────────────────────────────────────────────────────── */
+const Icon = {
+  Spark: function(p){ return React.createElement('svg',{viewBox:"0 0 16 16",fill:"none",width:p.size||14,height:p.size||14},React.createElement('path',{d:"M8 2v3M8 11v3M2 8h3M11 8h3M4.2 4.2l2.1 2.1M9.7 9.7l2.1 2.1M4.2 11.8l2.1-2.1M9.7 6.3l2.1-2.1",stroke:"currentColor",strokeWidth:"1.4",strokeLinecap:"round"})); },
+  Play:  function(p){ return React.createElement('svg',{viewBox:"0 0 16 16",fill:"currentColor",width:p.size||12,height:p.size||12},React.createElement('path',{d:"M4 3l9 5-9 5V3z"})); },
+  Check: function(p){ return React.createElement('svg',{viewBox:"0 0 16 16",fill:"none",width:p.size||14,height:p.size||14},React.createElement('path',{d:"M3 8.5l3 3 7-7",stroke:"currentColor",strokeWidth:"1.6",strokeLinecap:"round",strokeLinejoin:"round"})); },
+  Doc:   function(p){ return React.createElement('svg',{viewBox:"0 0 16 16",fill:"none",width:p.size||16,height:p.size||16},React.createElement('path',{d:"M3.5 2h6l3 3v9a.5.5 0 0 1-.5.5h-8.5A.5.5 0 0 1 3 14V2.5A.5.5 0 0 1 3.5 2z",stroke:"currentColor",strokeWidth:"1.2"}),React.createElement('path',{d:"M9 2v3h3.5M5.5 8.5h5M5.5 11h5",stroke:"currentColor",strokeWidth:"1.2",strokeLinecap:"round"})); },
+  Sheet: function(p){ return React.createElement('svg',{viewBox:"0 0 16 16",fill:"none",width:p.size||16,height:p.size||16},React.createElement('rect',{x:"2.5",y:"2.5",width:"11",height:"11",rx:"1",stroke:"currentColor",strokeWidth:"1.2"}),React.createElement('path',{d:"M2.5 6h11M2.5 9.5h11M6 6v7.5M9.5 6v7.5",stroke:"currentColor",strokeWidth:"1.2"})); },
+  X:     function(p){ return React.createElement('svg',{viewBox:"0 0 16 16",fill:"none",width:p.size||14,height:p.size||14},React.createElement('path',{d:"M4 4l8 8M12 4l-8 8",stroke:"currentColor",strokeWidth:"1.5",strokeLinecap:"round"})); },
+  Arrow: function(p){ return React.createElement('svg',{viewBox:"0 0 16 16",fill:"none",width:p.size||12,height:p.size||12},React.createElement('path',{d:"M3 8h10M9 4l4 4-4 4",stroke:"currentColor",strokeWidth:"1.5",strokeLinecap:"round",strokeLinejoin:"round"})); },
+  Back:  function(p){ return React.createElement('svg',{viewBox:"0 0 16 16",fill:"none",width:p.size||12,height:p.size||12},React.createElement('path',{d:"M13 8H3M7 4L3 8l4 4",stroke:"currentColor",strokeWidth:"1.5",strokeLinecap:"round",strokeLinejoin:"round"})); },
+  Search:function(p){ return React.createElement('svg',{viewBox:"0 0 16 16",fill:"none",width:p.size||14,height:p.size||14},React.createElement('circle',{cx:"7",cy:"7",r:"4.5",stroke:"currentColor",strokeWidth:"1.3"}),React.createElement('path',{d:"M11 11l3 3",stroke:"currentColor",strokeWidth:"1.3",strokeLinecap:"round"})); },
+};
+
+/* ── Helpers ─────────────────────────────────────────────────────── */
+function healthColor(band) {
+  var m = { HEALTHY:'var(--ok)', WATCH:'var(--warn)', AT_RISK:'var(--warn)', CRITICAL:'var(--err)', UNKNOWN:'var(--ink-4)', ARCHIVED:'var(--ink-4)' };
+  return m[band] || 'var(--ink-4)';
+}
+function healthSoft(band) {
+  var m = { HEALTHY:'var(--ok-soft)', WATCH:'var(--warn-soft)', AT_RISK:'var(--warn-soft)', CRITICAL:'var(--err-soft)', UNKNOWN:'var(--bg-2)', ARCHIVED:'var(--bg-2)' };
+  return m[band] || 'var(--bg-2)';
+}
+function statusColor(s) {
+  var m = { CONFIRMED:'var(--ok)', TRIAGE:'var(--warn)', DISCARDED:'var(--err)', FAILED:'var(--err)', PENDING:'var(--ink-3)', UNKNOWN:'var(--ink-4)' };
+  return m[(s||'').toUpperCase()] || 'var(--ink-4)';
+}
+function statusSoft(s) {
+  var m = { CONFIRMED:'var(--ok-soft)', TRIAGE:'var(--warn-soft)', DISCARDED:'var(--err-soft)', FAILED:'var(--err-soft)', PENDING:'var(--bg-2)', UNKNOWN:'var(--bg-2)' };
+  return m[(s||'').toUpperCase()] || 'var(--bg-2)';
+}
+function cx() { return Array.prototype.slice.call(arguments).filter(Boolean).join(' '); }
+
+/* ── Shared styles ───────────────────────────────────────────────── */
+var inputStyle = { width:'100%', padding:'10px 12px', border:'1px solid var(--line)', borderRadius:7, background:'#fff', fontSize:13.5, fontFamily:'inherit', color:'var(--ink)', outline:'none' };
+var btnPrimary = { display:'inline-flex', alignItems:'center', gap:8, padding:'10px 18px', background:'var(--accent)', color:'#fff', border:'none', borderRadius:7, fontSize:13, fontWeight:500, cursor:'pointer', letterSpacing:'-0.005em' };
+var btnGhost = { padding:'10px 14px', background:'transparent', color:'var(--ink-2)', border:'1px solid var(--line)', borderRadius:7, fontSize:13, fontWeight:500, cursor:'pointer' };
+
+/* ── Breadcrumb ──────────────────────────────────────────────────── */
+function Breadcrumb(props) {
+  var items = props.items;
+  return React.createElement('div', { style:{ display:'flex', alignItems:'center', gap:8, fontSize:12.5, color:'var(--ink-3)', fontFamily:'Geist Mono, monospace' } },
+    items.map(function(it, i) {
+      return React.createElement(React.Fragment, { key:i },
+        i > 0 && React.createElement('span', { style:{ color:'var(--ink-4)' } }, '/'),
+        React.createElement('span', { style:{ color: i===items.length-1 ? 'var(--ink)' : 'var(--ink-3)' } }, it)
+      );
+    })
+  );
+}
+
+/* ── Field ───────────────────────────────────────────────────────── */
+function Field(props) {
+  return React.createElement('div', null,
+    React.createElement('div', { style:{ display:'flex', alignItems:'baseline', gap:6, marginBottom:6 } },
+      React.createElement('label', { style:{ fontSize:12.5, fontWeight:500, color:'var(--ink)' } },
+        props.label,
+        props.required && React.createElement('span', { style:{ color:'var(--err)', marginLeft:2 } }, '*')
+      ),
+      props.hint && React.createElement('span', { style:{ fontSize:11.5, color:'var(--ink-4)' } }, String.fromCharCode(183) + ' ' + props.hint)
+    ),
+    props.children
+  );
+}
+
+/* ── StatusPill ──────────────────────────────────────────────────── */
+function StatusPill(props) {
+  var map = {
+    running: { label:'running', color:'var(--accent)', soft:'var(--accent-soft)', pulse:true },
+    done:    { label:'done',    color:'var(--ok)',     soft:'var(--ok-soft)' },
+    pending: { label:'pending', color:'var(--ink-3)',  soft:'var(--bg-2)' },
+    error:   { label:'error',   color:'var(--err)',    soft:'var(--err-soft)' },
+  };
+  var m = map[props.status] || { label:props.status, color:'var(--ink-3)', soft:'var(--bg-2)' };
+  return React.createElement('span', { style:{ display:'inline-flex', alignItems:'center', gap:6, fontSize:10.5, fontWeight:500, padding:'3px 8px', borderRadius:99, background:m.soft, color:m.color, fontFamily:'Geist Mono, monospace', letterSpacing:'0.04em' } },
+    React.createElement('span', { className: m.pulse ? 'pulse' : '', style:{ width:5, height:5, borderRadius:99, background:'currentColor' } }),
+    m.label
+  );
+}
+
+/* ── Sidebar ─────────────────────────────────────────────────────── */
+function Sidebar(props) {
+  var programmes = props.programmes;
+  var activeId = props.activeId;
+  return React.createElement('aside', { style:{ width:260, minWidth:260, height:'100%', background:'var(--bg-2)', borderRight:'1px solid var(--line)', display:'flex', flexDirection:'column' } },
+    /* logo + new button */
+    React.createElement('div', { style:{ padding:'22px 22px 18px', borderBottom:'1px solid var(--line)' } },
+      React.createElement('div', { style:{ display:'flex', alignItems:'center', gap:10 } },
+        React.createElement('div', { style:{ width:28, height:28, borderRadius:7, background:'var(--accent)', color:'#fff', display:'grid', placeItems:'center', fontFamily:'Instrument Serif, serif', fontSize:20, fontStyle:'italic', letterSpacing:'-0.5px' } }, 'c'),
+        React.createElement('div', null,
+          React.createElement('div', { style:{ fontSize:15, fontWeight:600, letterSpacing:'-0.01em' } }, 'Cobalt'),
+          React.createElement('div', { style:{ fontSize:11, color:'var(--ink-3)', marginTop:1 } }, 'Vendor Intelligence')
+        )
+      ),
+      React.createElement('button', { onClick:props.onNewRun, style:{ marginTop:18, width:'100%', padding:'9px 12px', background:'var(--ink)', color:'#fff', border:'none', borderRadius:7, fontSize:12.5, fontWeight:500, display:'flex', alignItems:'center', justifyContent:'center', gap:8, cursor:'pointer' } },
+        React.createElement('span', { style:{ fontSize:16, lineHeight:0.8, fontWeight:300 } }, '+'),
+        ' New programme'
+      )
+    ),
+    /* programme list */
+    React.createElement('div', { style:{ padding:'14px 14px 6px' } },
+      React.createElement('div', { style:{ fontSize:10.5, letterSpacing:'0.12em', textTransform:'uppercase', color:'var(--ink-4)', fontWeight:500, padding:'0 8px 6px' } }, 'Recent programmes')
+    ),
+    React.createElement('div', { style:{ flex:1, overflowY:'auto', padding:'0 8px 16px' } },
+      programmes.length === 0
+        ? React.createElement('div', { style:{ padding:'12px', fontSize:12, color:'var(--ink-4)', textAlign:'center' } }, 'No programmes yet')
+        : programmes.map(function(p) {
+            return React.createElement('button', { key:p.programme_id, className:cx('prog-item', activeId===p.programme_id && 'active'), onClick:function(){ props.onSelectProgramme && props.onSelectProgramme(p); }, style:{ width:'100%', textAlign:'left', padding:'9px 12px', margin:'2px 0', border:'none', background:'transparent', borderRadius:6, cursor:'pointer', display:'block' } },
+              React.createElement('div', { style:{ display:'flex', alignItems:'center', gap:6, fontSize:13, fontWeight:500, color:'var(--ink-2)' } },
+                activeId===p.programme_id && React.createElement('span', { style:{ width:5, height:5, borderRadius:99, background:'var(--accent)', display:'inline-block' } }),
+                React.createElement('span', { style:{ overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' } }, p.programme_id)
+              ),
+              React.createElement('div', { className:'prog-meta', style:{ fontSize:11, color:'var(--ink-4)', marginTop:2, fontFamily:'Geist Mono, monospace' } }, p.vendor_count ? p.vendor_count+' vendors' : 'no vendors'),
+              React.createElement('div', { className:'prog-meta', style:{ fontSize:11, color:'var(--ink-4)', marginTop:1 } }, p.last_run)
+            );
+          })
+    ),
+    /* footer */
+    React.createElement('div', { style:{ padding:'12px 22px', borderTop:'1px solid var(--line)', fontSize:11, color:'var(--ink-4)', display:'flex', justifyContent:'space-between' } },
+      React.createElement('span', null, 'Cobalt v1'),
+      React.createElement('span', { style:{ display:'inline-flex', alignItems:'center', gap:5 } },
+        React.createElement('span', { style:{ width:6, height:6, borderRadius:99, background:'var(--ok)' } }),
+        ' online'
+      )
+    )
+  );
+}
+
+/* ── Config View ─────────────────────────────────────────────────── */
+var PIPELINE_STEPS = [
+  { id:'intake',    label:'Intake',          name:'Vendor Intake',           desc:'Parses the uploaded vendor list, normalises columns, and emits a canonical row per entity.' },
+  { id:'enrichment',label:'Enrichment',      name:'P2 Enrichment',           desc:'Hits Companies House / OpenCorporates / GLEIF to enrich each vendor with verified metadata.' },
+  { id:'rs',        label:'RS Pipeline',     name:'Relationship & Spend',    desc:'Clusters duplicates, reconciles spend across cost centres, and scores each vendor.' },
+  { id:'analysis',  label:'Analysis & Intel',name:'Analysis & Intelligence', desc:'Evidence validation, scoring, commercial analysis, inquiry engine, and narrative generation.' },
+];
+
+function ConfigView(props) {
+  var _s = useState(''); var progId = _s[0]; var setProgId = _s[1];
+  var _c = useState(''); var company = _c[0]; var setCompany = _c[1];
+  var _vf = useState(null); var vendorFile = _vf[0]; var setVendorFile = _vf[1];
+  var _docs = useState([]); var docs = _docs[0]; var setDocs = _docs[1];
+  var vendorInputRef = useRef(null);
+  var docsInputRef = useRef(null);
+
+  var canStart = progId.trim() && company.trim() && vendorFile;
+
+  return React.createElement('div', { style:{ padding:'32px 56px', maxWidth:1100 } },
+    React.createElement(Breadcrumb, { items:['programmes','new'] }),
+    React.createElement('div', { style:{ marginTop:14 } },
+      React.createElement('h1', { style:{ margin:0, fontSize:28, fontWeight:600, letterSpacing:'-0.02em', lineHeight:1.15 } },
+        'Configure a new ',
+        ' programme'
+      ),
+      React.createElement('p', { style:{ margin:'6px 0 0', color:'var(--ink-3)', fontSize:14, maxWidth:640 } },
+        'Cobalt runs a four-stage pipeline — Intake, Enrichment, Relationship & Spend, and Analysis & Intelligence — to normalise your vendor master, surface duplicates, and score risk.'
+      )
+    ),
+
+    React.createElement('div', { style:{ marginTop:28, background:'var(--surface)', border:'1px solid var(--line)', borderRadius:12, overflow:'hidden' } },
+      /* card header */
+      React.createElement('div', { style:{ padding:'14px 22px', borderBottom:'1px solid var(--line)', display:'flex', alignItems:'center', justifyContent:'space-between', background:'var(--surface-2)' } },
+        React.createElement('div', { style:{ display:'flex', alignItems:'center', gap:10 } },
+          React.createElement('span', { style:{ fontFamily:'Geist Mono, monospace', fontSize:10.5, padding:'3px 7px', borderRadius:4, background:'var(--accent-soft)', color:'var(--accent)', letterSpacing:'0.05em', fontWeight:500 } }, 'STEP 01'),
+          React.createElement('div', { style:{ fontSize:14, fontWeight:500 } }, 'Pipeline configuration')
+        ),
+        React.createElement('div', { style:{ fontSize:12, color:'var(--ink-3)' } },
+          'Fields marked ', React.createElement('span', { style:{ color:'var(--err)' } }, '*'), ' are required'
+        )
+      ),
+
+      /* form body */
+      React.createElement('div', { style:{ padding:'28px 32px' } },
+        /* Programme ID + Company */
+        React.createElement('div', { style:{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:24 } },
+          React.createElement(Field, { label:'Programme ID', required:true, hint:'A short slug — used in URLs and logs.' },
+            React.createElement('input', { value:progId, onChange:function(e){ setProgId(e.target.value); }, placeholder:'e.g. q3-vendor-cleanup', style:inputStyle })
+          ),
+          React.createElement(Field, { label:'Your company name', required:true, hint:'Used as the buyer-side identity for entity resolution.' },
+            React.createElement('input', { value:company, onChange:function(e){ setCompany(e.target.value); }, placeholder:'e.g. Acme Corp', style:inputStyle })
+          )
+        ),
+
+        /* Vendor list */
+        React.createElement('div', { style:{ marginTop:26 } },
+          React.createElement(Field, { label:'Vendor list', required:true, hint:'CSV or XLSX · must include a vendor_name column.' },
+            vendorFile
+              ? React.createElement('div', { style:{ border:'1px solid var(--line)', borderRadius:8, background:'#fff', padding:'12px 14px', display:'flex', alignItems:'center', justifyContent:'space-between', gap:12 } },
+                  React.createElement('div', { style:{ display:'flex', alignItems:'center', gap:12 } },
+                    React.createElement('div', { style:{ width:34, height:34, borderRadius:6, background:'var(--ok-soft)', color:'var(--ok)', display:'grid', placeItems:'center', flexShrink:0 } }, React.createElement(Icon.Sheet)),
+                    React.createElement('div', null,
+                      React.createElement('div', { style:{ fontWeight:500, fontSize:13.5 } }, vendorFile.name),
+                      React.createElement('div', { style:{ fontSize:11.5, color:'var(--ink-3)', marginTop:2, fontFamily:'Geist Mono, monospace' } }, (vendorFile.size/1024).toFixed(0)+' KB')
+                    )
+                  ),
+                  React.createElement('button', { onClick:function(){ setVendorFile(null); }, style:{ background:'transparent', border:'none', cursor:'pointer', color:'var(--ink-3)', padding:6, display:'grid', placeItems:'center' } }, React.createElement(Icon.X))
+                )
+              : React.createElement('div', {
+                  onDrop:function(e){ e.preventDefault(); var f=e.dataTransfer.files[0]; if(f) setVendorFile(f); },
+                  onDragOver:function(e){ e.preventDefault(); },
+                  onClick:function(){ vendorInputRef.current && vendorInputRef.current.click(); },
+                  style:{ border:'1.5px dashed var(--line-2)', borderRadius:8, padding:'24px 20px', textAlign:'center', background:'var(--surface-2)', color:'var(--ink-3)', fontSize:13, cursor:'pointer' }
+                },
+                  React.createElement(Icon.Sheet),
+                  React.createElement('span', { style:{ marginLeft:6 } }, 'Drop vendors.csv / vendors.xlsx here or click to browse'),
+                  React.createElement('input', { ref:vendorInputRef, type:'file', accept:'.csv,.xlsx,.xls', style:{ display:'none' }, onChange:function(e){ if(e.target.files[0]) setVendorFile(e.target.files[0]); } })
+                )
+          )
+        ),
+
+        /* Supporting docs */
+        React.createElement('div', { style:{ marginTop:22 } },
+          React.createElement(Field, { label:'Supporting documents', hint:'Optional — contracts, invoices, SOWs.' },
+            React.createElement('div', null,
+              docs.length > 0 && React.createElement('div', { style:{ display:'flex', flexDirection:'column', gap:6, marginBottom:10 } },
+                docs.map(function(f) {
+                  return React.createElement('div', { key:f.name, style:{ display:'flex', alignItems:'center', justifyContent:'space-between', padding:'8px 12px', border:'1px solid var(--line)', borderRadius:7, background:'#fff' } },
+                    React.createElement('div', { style:{ display:'flex', alignItems:'center', gap:10 } },
+                      React.createElement(Icon.Doc),
+                      React.createElement('span', { style:{ fontSize:13 } }, f.name),
+                      React.createElement('span', { style:{ fontSize:11, color:'var(--ink-4)', fontFamily:'Geist Mono, monospace' } }, (f.size/1024).toFixed(0)+' KB')
+                    ),
+                    React.createElement('button', { onClick:function(){ setDocs(docs.filter(function(d){ return d.name!==f.name; })); }, style:{ background:'transparent', border:'none', cursor:'pointer', color:'var(--ink-3)', padding:4, display:'grid', placeItems:'center' } }, React.createElement(Icon.X, { size:12 }))
+                  );
+                })
+              ),
+              React.createElement('div', {
+                onDrop:function(e){ e.preventDefault(); setDocs(function(d){ return d.concat(Array.from(e.dataTransfer.files)); }); },
+                onDragOver:function(e){ e.preventDefault(); },
+                onClick:function(){ docsInputRef.current && docsInputRef.current.click(); },
+                style:{ border:'1.5px dashed var(--line-2)', borderRadius:8, padding:'18px 20px', textAlign:'center', background:'var(--surface-2)', color:'var(--ink-3)', fontSize:13, cursor:'pointer' }
+              },
+                React.createElement(Icon.Doc),
+                React.createElement('span', { style:{ marginLeft:6 } }, 'Drop files here or click to browse'),
+                React.createElement('input', { ref:docsInputRef, type:'file', multiple:true, style:{ display:'none' }, onChange:function(e){ setDocs(function(d){ return d.concat(Array.from(e.target.files)); }); } })
+              )
+            )
+          )
+        ),
+
+        /* Pipeline step cards */
+        React.createElement('div', { style:{ marginTop:28, display:'grid', gridTemplateColumns:'repeat(4, 1fr)', gap:12 } },
+          PIPELINE_STEPS.map(function(a) {
+            return React.createElement('div', { key:a.id, style:{ border:'1px solid var(--line)', borderRadius:9, padding:'14px 16px', background:'var(--surface-2)' } },
+              React.createElement('div', { style:{ display:'flex', alignItems:'center', gap:6, fontSize:10.5, letterSpacing:'0.08em', textTransform:'uppercase', color:'var(--ink-4)' } },
+                React.createElement(Icon.Spark, { size:11 }), ' ', a.label
+              ),
+              React.createElement('div', { style:{ marginTop:4, fontWeight:500, fontSize:13.5 } }, a.name),
+              React.createElement('div', { style:{ marginTop:4, fontSize:12, color:'var(--ink-3)', lineHeight:1.4 } }, a.desc)
+            );
+          })
+        )
+      ),
+
+      /* footer */
+      React.createElement('div', { style:{ padding:'16px 22px', borderTop:'1px solid var(--line)', background:'var(--surface-2)', display:'flex', alignItems:'center', justifyContent:'space-between', gap:12 } },
+        React.createElement('div', { style:{ fontSize:12, color:'var(--ink-3)' } }, 'All four stages run automatically in sequence'),
+        React.createElement('button', {
+          onClick:function(){ props.onStart({ progId:progId.trim(), company:company.trim(), vendorFile:vendorFile, docs:docs }); },
+          disabled:!canStart,
+          style:Object.assign({}, btnPrimary, { opacity:canStart?1:0.5, cursor:canStart?'pointer':'not-allowed' })
+        }, React.createElement(Icon.Play), ' Start pipeline')
+      )
+    )
+  );
+}
+
+/* ── Progress View ───────────────────────────────────────────────── */
+var STEP_META = [
+  { id:'intake',    label:'Intake',          name:'Vendor Intake',           steps:['parse','normalize','dedupe-keys','ingest'] },
+  { id:'enrichment',label:'Enrichment',      name:'P2 Enrichment',           steps:['resolve','tax-lookup','address','classify','merge'] },
+  { id:'rs',        label:'RS Pipeline',     name:'Relationship & Spend',    steps:['cluster','spend','scoring','flags','finalize'] },
+  { id:'analysis',  label:'Analysis & Intel',name:'Analysis & Intelligence', steps:['evidence','commercial','inquiry','scoring','trends','findings','narrative'] },
+];
+
+function ProgressView(props) {
+  var progId = props.progId;
+  var company = props.company;
+  var runId = props.runId;
+
+  var _ss = useState(STEP_META.map(function(s,i){ return { id:s.id, status:i===0?'running':'pending', result:null }; }));
+  var stepStates = _ss[0]; var setStepStates = _ss[1];
+  var _prog = useState(0); var progress = _prog[0]; var setProgress = _prog[1];
+  var initLogs = [
+    { t:new Date().toLocaleTimeString(), kind:'sys',  text:'programme: '+progId },
+    { t:new Date().toLocaleTimeString(), kind:'sys',  text:'company:   '+company },
+    { t:new Date().toLocaleTimeString(), kind:'info', text:'pipeline starting...' },
+  ];
+  var _logs = useState(initLogs); var logs = _logs[0]; var setLogs = _logs[1];
+  var _done = useState(false); var done = _done[0]; var setDone = _done[1];
+  var _err = useState(null); var pipelineError = _err[0]; var setPipelineError = _err[1];
+  var consoleRef = useRef(null);
+
+  useEffect(function() {
+    if (consoleRef.current) consoleRef.current.scrollTop = consoleRef.current.scrollHeight;
+  }, [logs]);
+
+  useEffect(function() {
+    var es = new EventSource('/api/run/'+runId+'/stream');
+
+    es.onmessage = function(e) {
+      var msg;
+      try { msg = JSON.parse(e.data); } catch(ex) { return; }
+      if (msg.type === 'ping') return;
+
+      if (msg.type === 'done') {
+        setDone(true);
+        setProgress(100);
+        setLogs(function(l) { return l.concat([{ t:new Date().toLocaleTimeString(), kind:'done', text:'pipeline complete · results ready' }]); });
+        es.close();
+        return;
+      }
+
+      if (msg.type === 'pipeline_error') {
+        setPipelineError(msg.msg || 'Unknown error');
+        setDone(true);
+        setLogs(function(l) { return l.concat([{ t:new Date().toLocaleTimeString(), kind:'err', text:'pipeline error: '+(msg.msg||'') }]); });
+        es.close();
+        return;
+      }
+
+      if (msg.type === 'step') {
+        var step=msg.step, status=msg.status, pct=msg.progress;
+        if (pct != null) setProgress(pct);
+        setStepStates(function(states) {
+          return states.map(function(st, idx) {
+            if (st.id !== step) return st;
+            var result = null;
+            if (status === 'done') {
+              if (step==='intake') result = (msg.confirmed||0)+' confirmed, '+(msg.triage||0)+' triage';
+              else if (step==='analysis') result = (msg.completed||0)+' analysed'+(msg.skipped?', '+msg.skipped+' skipped':'');
+              else result = (msg.completed||0)+'/'+(msg.total||0)+' completed';
+            }
+            return Object.assign({}, st, { status:status, result:result });
+          });
+        });
+        if (status === 'done') {
+          var idx = STEP_META.findIndex(function(s){ return s.id===step; });
+          if (idx < STEP_META.length-1) {
+            setStepStates(function(states) {
+              return states.map(function(st, i) { return i===idx+1 ? Object.assign({}, st, { status:'running' }) : st; });
+            });
+          }
+        }
+        var meta = STEP_META.find(function(s){ return s.id===step; });
+        var txt = status==='done'?'done':status==='error'?'ERROR':'started';
+        setLogs(function(l) { return l.concat([{ t:new Date().toLocaleTimeString(), kind:status==='done'?'ok':status==='error'?'err':'agent', text:(meta?meta.name:step)+': '+txt }]); });
+      }
+
+      if (msg.type === 'log') {
+        setLogs(function(l) { return l.concat([{ t:msg.ts||new Date().toLocaleTimeString(), kind:msg.level==='ERROR'?'err':'log', agent:msg.label, text:msg.msg }]); });
+      }
+    };
+
+    es.onerror = function() { es.close(); };
+    return function() { es.close(); };
+  }, [runId]);
+
+  return React.createElement('div', { style:{ padding:'32px 56px', maxWidth:1280 } },
+    React.createElement(Breadcrumb, { items:['programmes', progId, 'run', runId] }),
+    React.createElement('div', { style:{ marginTop:14, display:'flex', alignItems:'baseline', justifyContent:'space-between', gap:16 } },
+      React.createElement('div', null,
+        React.createElement('div', { style:{ display:'flex', alignItems:'center', gap:10 } },
+          React.createElement('h1', { style:{ margin:0, fontSize:26, fontWeight:600, letterSpacing:'-0.02em' } }, progId),
+          React.createElement('span', { style:{ fontSize:11, fontWeight:500, padding:'3px 8px', borderRadius:99, background:done?'var(--ok-soft)':'var(--accent-soft)', color:done?'var(--ok)':'var(--accent)', display:'inline-flex', alignItems:'center', gap:6 } },
+            React.createElement('span', { className:done?'':'pulse', style:{ width:6, height:6, borderRadius:99, background:'currentColor' } }),
+            done ? (pipelineError?'ERROR':'COMPLETE') : 'RUNNING'
+          )
+        ),
+        React.createElement('div', { style:{ marginTop:6, fontSize:13, color:'var(--ink-3)' } }, company+' · '+new Date().toLocaleTimeString())
+      ),
+      React.createElement('div', { style:{ display:'flex', gap:10 } },
+        React.createElement('button', { onClick:props.onNewRun, style:btnGhost }, React.createElement(Icon.Back), ' New programme'),
+        React.createElement('button', { onClick:props.onComplete, disabled:!done, style:Object.assign({}, btnPrimary, { opacity:done?1:0.45, cursor:done?'pointer':'not-allowed' }) },
+          'View results ', React.createElement(Icon.Arrow)
+        )
+      )
+    ),
+
+    /* stage cards */
+    React.createElement('div', { style:{ marginTop:24, display:'grid', gridTemplateColumns:'repeat(4, 1fr)', gap:14 } },
+      STEP_META.map(function(a, i) {
+        var st = stepStates[i];
+        var isRun = st.status==='running';
+        var isDone = st.status==='done';
+        var isErr = st.status==='error';
+        var isPend = st.status==='pending';
+        return React.createElement('div', { key:a.id, style:{ background:'var(--surface)', border:'1px solid '+(isRun?'var(--accent)':isErr?'var(--err)':'var(--line)'), borderRadius:10, padding:'14px 16px', boxShadow:isRun?'0 0 0 3px rgba(31,58,138,0.08)':'none', transition:'all .2s ease' } },
+          React.createElement('div', { style:{ display:'flex', alignItems:'center', justifyContent:'space-between' } },
+            React.createElement('div', { style:{ fontSize:10.5, letterSpacing:'0.1em', textTransform:'uppercase', color:'var(--ink-4)', fontWeight:500 } }, 'Stage '+String(i+1).padStart(2,'0')+' · '+a.label),
+            React.createElement(StatusPill, { status:isErr?'error':st.status })
+          ),
+          React.createElement('div', { style:{ marginTop:4, fontSize:15, fontWeight:500, letterSpacing:'-0.01em' } }, a.name),
+          React.createElement('div', { style:{ marginTop:10 } },
+            a.steps.map(function(tag, si) {
+              var passed = isDone || (isRun && si < 2);
+              var active = isRun && si===1;
+              return React.createElement('div', { key:tag, style:{ display:'flex', alignItems:'center', gap:8, fontSize:12, padding:'3px 0', color:passed?'var(--ink-2)':'var(--ink-4)', fontFamily:'Geist Mono, monospace' } },
+                React.createElement('span', { style:{ width:12, display:'grid', placeItems:'center', color:passed?'var(--ok)':'var(--ink-4)' } },
+                  active && !isDone
+                    ? React.createElement('svg', { viewBox:"0 0 16 16", width:11, height:11, className:'spin' }, React.createElement('circle', { cx:8, cy:8, r:6, stroke:'var(--accent)', strokeWidth:2, fill:'none', strokeDasharray:'22 16' }))
+                    : passed ? React.createElement(Icon.Check, { size:11 }) : React.createElement('span', { style:{ width:5, height:5, borderRadius:99, background:'currentColor' } })
+                ),
+                React.createElement('span', { style:{ flex:1, opacity:isPend?0.6:1 } }, tag)
+              );
+            })
+          ),
+          isDone && st.result && React.createElement('div', { style:{ marginTop:8, fontSize:11.5, color:'var(--ok)', fontFamily:'Geist Mono, monospace', borderTop:'1px dashed var(--line)', paddingTop:8 } }, st.result),
+          isErr && React.createElement('div', { style:{ marginTop:8, fontSize:11.5, color:'var(--err)', fontFamily:'Geist Mono, monospace', borderTop:'1px dashed var(--line)', paddingTop:8 } }, 'failed — check console')
+        );
+      })
+    ),
+
+    /* progress bar */
+    React.createElement('div', { style:{ marginTop:18 } },
+      React.createElement('div', { style:{ display:'flex', justifyContent:'space-between', fontSize:11.5, fontFamily:'Geist Mono, monospace', color:'var(--ink-3)', marginBottom:6 } },
+        React.createElement('span', null, 'OVERALL · '+Math.round(progress)+'%'),
+        React.createElement('span', null, stepStates.filter(function(s){ return s.status==='done'; }).length+'/'+STEP_META.length+' stages complete')
+      ),
+      React.createElement('div', { style:{ height:6, background:'var(--bg-2)', borderRadius:99, overflow:'hidden' } },
+        React.createElement('div', { className:done?'':'shimmer', style:{ width:progress+'%', height:'100%', background:done?'var(--ok)':'var(--accent)', transition:'width .3s ease', borderRadius:99 } })
+      )
+    ),
+
+    /* console */
+    React.createElement('div', { style:{ marginTop:22 } },
+      React.createElement('div', { style:{ background:'#15171a', border:'1px solid #2a2d33', borderRadius:10, overflow:'hidden' } },
+        React.createElement('div', { style:{ padding:'10px 16px', borderBottom:'1px solid #2a2d33', display:'flex', alignItems:'center', justifyContent:'space-between', background:'#1b1d21' } },
+          React.createElement('div', { style:{ display:'flex', alignItems:'center', gap:10, color:'#d5d7db', fontSize:12, fontFamily:'Geist Mono, monospace' } },
+            React.createElement('span', { style:{ display:'flex', gap:5 } },
+              React.createElement('span', { style:{ width:9, height:9, borderRadius:99, background:'#3b3f47' } }),
+              React.createElement('span', { style:{ width:9, height:9, borderRadius:99, background:'#3b3f47' } }),
+              React.createElement('span', { style:{ width:9, height:9, borderRadius:99, background:done?'#2a8a4d':'#5d5a2a' } })
+            ),
+            React.createElement('span', { style:{ color:'#9aa0aa' } }, 'console · run.log')
+          ),
+          React.createElement('div', { style:{ fontSize:11, fontFamily:'Geist Mono, monospace', color:'#9aa0aa' } }, logs.length+' lines')
+        ),
+        React.createElement('div', { ref:consoleRef, style:{ padding:'14px 18px', fontFamily:'Geist Mono, monospace', fontSize:12, lineHeight:1.7, color:'#d4d7dd', height:320, overflowY:'auto' } },
+          logs.map(function(l, i) {
+            var colorMap = { sys:'#7a8190', info:'#9aa0aa', agent:'#8aa6c9', log:'#d4d7dd', ok:'#7ac28a', done:'#7ac28a', err:'#e07070' };
+            var color = colorMap[l.kind] || '#d4d7dd';
+            return React.createElement('div', { key:i, style:{ display:'flex', gap:12, color:color } },
+              React.createElement('span', { style:{ color:'#5d6370', width:70, flexShrink:0 } }, l.t),
+              l.agent
+                ? React.createElement('span', { style:{ color:'#c8a878', width:110, flexShrink:0 } }, '['+(l.agent.slice(0,12))+']')
+                : React.createElement('span', { style:{ width:110, flexShrink:0 } }),
+              React.createElement('span', { style:{ flex:1, whiteSpace:'pre-wrap', wordBreak:'break-word' } }, l.text)
+            );
+          }),
+          !done && React.createElement('div', { className:'caret', style:{ color:'#8aa6c9' } })
+        )
+      )
+    )
+  );
+}
+
+/* ── Results View ─────────────────────────────────────────────────── */
+function ResultsView(props) {
+  var progId = props.progId;
+  var company = props.company;
+
+  var _v = useState([]); var vendors = _v[0]; var setVendors = _v[1];
+  var _l = useState(true); var loading = _l[0]; var setLoading = _l[1];
+  var _sel = useState(null); var selected = _sel[0]; var setSelected = _sel[1];
+  var _f = useState('all'); var filter = _f[0]; var setFilter = _f[1];
+  var _q = useState(''); var query = _q[0]; var setQuery = _q[1];
+
+  useEffect(function() {
+    setLoading(true);
+    fetch('/api/programmes/'+encodeURIComponent(progId)+'/vendors')
+      .then(function(r){ return r.json(); })
+      .then(function(data){ setVendors(data||[]); setLoading(false); })
+      .catch(function(){ setLoading(false); });
+  }, [progId]);
+
+  var FILTERS = [
+    { k:'all', label:'All' },
+    { k:'CONFIRMED', label:'Confirmed' },
+    { k:'TRIAGE', label:'Triage' },
+    { k:'DISCARDED', label:'Discarded' },
+  ];
+
+  var counts = useMemo(function() {
+    var c = { all:vendors.length };
+    FILTERS.slice(1).forEach(function(f){ c[f.k] = vendors.filter(function(v){ return (v.status||'').toUpperCase()===f.k; }).length; });
+    return c;
+  }, [vendors]);
+
+  var filtered = useMemo(function() {
+    return vendors
+      .filter(function(v){ return filter==='all' || (v.status||'').toUpperCase()===filter; })
+      .filter(function(v){ return !query || (v.vendor_name+v.vendor_id).toLowerCase().indexOf(query.toLowerCase())!==-1; });
+  }, [vendors, filter, query]);
+
+  var criVendors = vendors.filter(function(v){ return v.cri_score!=null; });
+
+  return React.createElement('div', { style:{ padding:'32px 56px', maxWidth:1480 } },
+    React.createElement(Breadcrumb, { items:['programmes', progId, 'results'] }),
+    React.createElement('div', { style:{ marginTop:14, display:'flex', alignItems:'flex-end', justifyContent:'space-between', gap:16 } },
+      React.createElement('div', null,
+        React.createElement('div', { style:{ display:'flex', alignItems:'center', gap:10 } },
+          React.createElement('h1', { style:{ margin:0, fontSize:28, fontWeight:600, letterSpacing:'-0.02em' } }, 'Results'),
+          React.createElement('span', { style:{ fontSize:11, fontWeight:500, padding:'3px 8px', borderRadius:99, background:'var(--ok-soft)', color:'var(--ok)', display:'inline-flex', alignItems:'center', gap:6 } },
+            React.createElement(Icon.Check, { size:11 }), ' READY'
+          )
+        ),
+        React.createElement('div', { style:{ marginTop:6, fontSize:13, color:'var(--ink-3)' } }, progId+(company?' · '+company:''))
+      ),
+      React.createElement('button', { onClick:props.onNewRun, style:btnGhost }, 'New programme')
+    ),
+
+    /* KPI strip */
+    React.createElement('div', { style:{ marginTop:22, display:'grid', gridTemplateColumns:'repeat(4, 1fr)', gap:12 } },
+      React.createElement(KPI, { label:'Vendors processed', value:vendors.length, sub:vendors.length+' entities' }),
+      React.createElement(KPI, { label:'Confirmed', value:counts.CONFIRMED||0, accent:'var(--ok)', sub:(vendors.length?Math.round((counts.CONFIRMED||0)/vendors.length*100):0)+'% of total' }),
+      React.createElement(KPI, { label:'Triage / review', value:counts.TRIAGE||0, accent:'var(--warn)', sub:'need manual review' }),
+      React.createElement(KPI, { label:'CRI analysed', value:criVendors.length, accent:'var(--info)', sub:(vendors.length?Math.round(criVendors.length/vendors.length*100):0)+'% scored' })
+    ),
+
+    /* toolbar */
+    React.createElement('div', { style:{ marginTop:24, display:'flex', alignItems:'center', justifyContent:'space-between', gap:12 } },
+      React.createElement('div', { style:{ display:'flex', gap:4, background:'var(--bg-2)', padding:4, borderRadius:8, border:'1px solid var(--line)' } },
+        FILTERS.map(function(f) {
+          return React.createElement('button', { key:f.k, onClick:function(){ setFilter(f.k); }, style:{ padding:'6px 12px', fontSize:12.5, fontWeight:500, border:'none', borderRadius:5, cursor:'pointer', background:filter===f.k?'#fff':'transparent', color:filter===f.k?'var(--ink)':'var(--ink-3)', boxShadow:filter===f.k?'0 1px 2px rgba(0,0,0,0.05)':'none', display:'inline-flex', alignItems:'center', gap:6 } },
+            f.label,
+            React.createElement('span', { style:{ fontSize:10.5, fontFamily:'Geist Mono, monospace', color:'var(--ink-4)', background:filter===f.k?'var(--bg-2)':'transparent', padding:'1px 5px', borderRadius:3 } }, counts[f.k]||0)
+          );
+        })
+      ),
+      React.createElement('div', { style:{ display:'flex', alignItems:'center', gap:8, padding:'7px 12px', background:'#fff', border:'1px solid var(--line)', borderRadius:7, width:280 } },
+        React.createElement(Icon.Search),
+        React.createElement('input', { value:query, onChange:function(e){ setQuery(e.target.value); }, placeholder:'Search vendors…', style:{ border:'none', outline:'none', flex:1, fontSize:13, background:'transparent', fontFamily:'inherit' } })
+      )
+    ),
+
+    /* vendor grid */
+    loading
+      ? React.createElement('div', { style:{ marginTop:40, textAlign:'center', color:'var(--ink-4)', fontSize:13 } }, 'Loading vendors…')
+      : filtered.length===0
+        ? React.createElement('div', { style:{ marginTop:40, textAlign:'center', color:'var(--ink-4)', fontSize:13 } }, 'No vendors match.')
+        : React.createElement('div', { style:{ marginTop:16, display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(310px, 1fr))', gap:12 } },
+            filtered.map(function(v, i) { return React.createElement(VendorTile, { key:v.vendor_id, vendor:v, onClick:function(){ setSelected(v); }, index:i }); })
+          ),
+
+    selected && React.createElement(VendorDrawer, { vendor:selected, progId:progId, onClose:function(){ setSelected(null); } })
+  );
+}
+
+function KPI(props) {
+  return React.createElement('div', { style:{ background:'var(--surface)', border:'1px solid var(--line)', borderRadius:10, padding:'14px 18px' } },
+    React.createElement('div', { style:{ fontSize:11, letterSpacing:'0.08em', textTransform:'uppercase', color:'var(--ink-4)', fontWeight:500 } }, props.label),
+    React.createElement('div', { style:{ marginTop:6, fontSize:26, fontWeight:600, letterSpacing:'-0.02em', color:props.accent||'var(--ink)', fontFamily:'Geist, sans-serif' } }, props.value),
+    React.createElement('div', { style:{ marginTop:2, fontSize:12, color:'var(--ink-3)' } }, props.sub)
+  );
+}
+
+function VendorTile(props) {
+  var vendor = props.vendor;
+  var sc = statusColor(vendor.status);
+  var ss = statusSoft(vendor.status);
+  var band = vendor.health_band;
+  return React.createElement('button', { onClick:props.onClick, className:'vendor-tile fade-up', style:{ textAlign:'left', cursor:'pointer', background:'var(--surface)', border:'1px solid var(--line)', borderRadius:10, padding:'16px 18px', animationDelay:(props.index*25)+'ms', display:'flex', flexDirection:'column', gap:10, position:'relative', overflow:'hidden', width:'100%' } },
+    React.createElement('div', { style:{ position:'absolute', left:0, top:0, bottom:0, width:3, background:sc } }),
+    React.createElement('div', { style:{ display:'flex', alignItems:'flex-start', justifyContent:'space-between', gap:10 } },
+      React.createElement('div', { style:{ minWidth:0, flex:1 } },
+        React.createElement('div', { style:{ fontSize:11, color:'var(--ink-4)', fontFamily:'Geist Mono, monospace' } }, vendor.vendor_id),
+        React.createElement('div', { style:{ fontSize:15, fontWeight:600, letterSpacing:'-0.01em', marginTop:2, lineHeight:1.25, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' } }, vendor.vendor_name),
+        React.createElement('div', { style:{ fontSize:12, color:'var(--ink-3)', marginTop:3 } }, vendor.data_class||'CLASS_D')
+      ),
+      React.createElement('div', { style:{ display:'flex', flexDirection:'column', alignItems:'flex-end', gap:5 } },
+        React.createElement('span', { style:{ fontSize:10.5, fontWeight:500, padding:'3px 8px', borderRadius:99, background:ss, color:sc, letterSpacing:'0.04em', whiteSpace:'nowrap', fontFamily:'Geist Mono, monospace' } }, (vendor.status||'UNKNOWN').toUpperCase()),
+        band && React.createElement('span', { style:{ fontSize:10.5, fontWeight:500, padding:'2px 7px', borderRadius:99, background:healthSoft(band), color:healthColor(band), letterSpacing:'0.04em', fontFamily:'Geist Mono, monospace' } }, band)
+      )
+    ),
+    vendor.cri_score!=null
+      ? React.createElement('div', { style:{ display:'flex', alignItems:'center', justifyContent:'space-between', paddingTop:10, borderTop:'1px dashed var(--line)', fontSize:11.5, color:'var(--ink-3)', fontFamily:'Geist Mono, monospace' } },
+          React.createElement('span', null, 'CRI Score'),
+          React.createElement('span', { style:{ fontWeight:600, fontSize:14, color:vendor.cri_score>=70?'var(--ok)':vendor.cri_score>=45?'var(--warn)':'var(--err)' } },
+            typeof vendor.cri_score==='number' ? vendor.cri_score.toFixed(1) : vendor.cri_score
+          )
+        )
+      : React.createElement('div', { style:{ paddingTop:10, borderTop:'1px dashed var(--line)', fontSize:11, color:'var(--ink-4)', fontFamily:'Geist Mono, monospace' } }, 'open →')
+  );
+}
+
+/* ── Vendor Drawer ───────────────────────────────────────────────── */
+var DRAWER_TABS = [
+  { k:'main',           label:'Entity' },
+  { k:'vendor_profile', label:'Profile' },
+  { k:'rs_profile',     label:'RS Profile' },
+  { k:'analysis',       label:'Analysis' },
+  { k:'ledger',         label:'Ledger' },
+];
+
+function VendorDrawer(props) {
+  var vendor = props.vendor;
+  var progId = props.progId;
+  var _tab = useState('main'); var tab = _tab[0]; var setTab = _tab[1];
+  var _fc = useState(''); var fileContent = _fc[0]; var setFileContent = _fc[1];
+  var _lf = useState(false); var loadingFile = _lf[0]; var setLoadingFile = _lf[1];
+  var sc = statusColor(vendor.status);
+  var ss = statusSoft(vendor.status);
+
+  useEffect(function() {
+    var h = function(e) { if (e.key==='Escape') props.onClose(); };
+    window.addEventListener('keydown', h);
+    return function() { window.removeEventListener('keydown', h); };
+  }, [props.onClose]);
+
+  useEffect(function() {
+    setLoadingFile(true);
+    setFileContent('');
+    fetch('/api/vendor-file?programme='+encodeURIComponent(progId)+'&vendor='+encodeURIComponent(vendor.vendor_id)+'&file='+tab)
+      .then(function(r){ return r.json(); })
+      .then(function(d){ setFileContent(d.exists ? d.content : '(file not found)'); setLoadingFile(false); })
+      .catch(function(){ setFileContent('(error loading file)'); setLoadingFile(false); });
+  }, [tab, vendor.vendor_id, progId]);
+
+  return React.createElement('div', { className:'drawer-overlay', onClick:props.onClose, style:{ position:'fixed', inset:0, background:'rgba(20,18,12,0.34)', zIndex:100, display:'flex', justifyContent:'flex-end' } },
+    React.createElement('div', { className:'drawer-panel', onClick:function(e){ e.stopPropagation(); }, style:{ width:'min(680px, 92vw)', height:'100%', background:'var(--surface)', borderLeft:'1px solid var(--line)', boxShadow:'-16px 0 40px rgba(0,0,0,0.12)', display:'flex', flexDirection:'column', overflow:'hidden' } },
+      /* header */
+      React.createElement('div', { style:{ padding:'18px 24px', borderBottom:'1px solid var(--line)', display:'flex', alignItems:'flex-start', justifyContent:'space-between', gap:14 } },
+        React.createElement('div', { style:{ minWidth:0 } },
+          React.createElement('div', { style:{ display:'flex', alignItems:'center', gap:8, flexWrap:'wrap' } },
+            React.createElement('span', { style:{ fontFamily:'Geist Mono, monospace', fontSize:11.5, color:'var(--ink-4)' } }, vendor.vendor_id),
+            React.createElement('span', { style:{ fontSize:10.5, fontWeight:500, padding:'2px 7px', borderRadius:99, background:ss, color:sc, letterSpacing:'0.04em', fontFamily:'Geist Mono, monospace' } }, (vendor.status||'UNKNOWN').toUpperCase()),
+            vendor.health_band && React.createElement('span', { style:{ fontSize:10.5, fontWeight:500, padding:'2px 7px', borderRadius:99, background:healthSoft(vendor.health_band), color:healthColor(vendor.health_band), letterSpacing:'0.04em', fontFamily:'Geist Mono, monospace' } }, vendor.health_band)
+          ),
+          React.createElement('h2', { style:{ margin:'6px 0 0', fontSize:22, fontWeight:600, letterSpacing:'-0.02em', lineHeight:1.2 } }, vendor.vendor_name),
+          vendor.cri_score!=null
+            ? React.createElement('div', { style:{ marginTop:4, fontSize:13, color:'var(--ink-3)' } },
+                'CRI Score: ',
+                React.createElement('span', { style:{ fontWeight:600, color:vendor.cri_score>=70?'var(--ok)':vendor.cri_score>=45?'var(--warn)':'var(--err)', fontFamily:'Geist Mono, monospace' } },
+                  typeof vendor.cri_score==='number' ? vendor.cri_score.toFixed(1) : vendor.cri_score
+                ),
+                vendor.health_band ? ' · '+vendor.health_band : ''
+              )
+            : React.createElement('div', { style:{ marginTop:4, fontSize:13, color:'var(--ink-3)' } }, vendor.data_class||'CLASS_D')
+        ),
+        React.createElement('button', { onClick:props.onClose, style:{ background:'var(--bg-2)', border:'1px solid var(--line)', borderRadius:7, padding:7, cursor:'pointer', display:'grid', placeItems:'center', color:'var(--ink-2)', flexShrink:0 } }, React.createElement(Icon.X))
+      ),
+
+      /* tabs */
+      React.createElement('div', { style:{ display:'flex', borderBottom:'1px solid var(--line)', background:'var(--surface-2)', overflowX:'auto' } },
+        DRAWER_TABS.map(function(t) {
+          var avail = vendor.files && vendor.files[t.k];
+          return React.createElement('button', { key:t.k, onClick:function(){ setTab(t.k); }, style:{ padding:'10px 16px', fontSize:12.5, fontWeight:500, border:'none', borderBottom:tab===t.k?'2px solid var(--accent)':'2px solid transparent', background:'transparent', color:tab===t.k?'var(--accent)':'var(--ink-3)', cursor:'pointer', whiteSpace:'nowrap', opacity:avail?1:0.4 } },
+            t.label, !avail && React.createElement('span', { style:{ marginLeft:4, fontSize:10, color:'var(--ink-4)' } }, '—')
+          );
+        })
+      ),
+
+      /* file content */
+      React.createElement('div', { style:{ flex:1, overflowY:'auto' } },
+        loadingFile
+          ? React.createElement('div', { style:{ padding:24, textAlign:'center', color:'var(--ink-4)', fontSize:13 } }, 'Loading…')
+          : React.createElement('pre', { style:{ margin:0, padding:'18px 24px', fontFamily:'Geist Mono, monospace', fontSize:12, lineHeight:1.7, color:'var(--ink-2)', background:'transparent', whiteSpace:'pre-wrap', wordBreak:'break-word' } }, fileContent)
+      ),
+
+      /* footer */
+      React.createElement('div', { style:{ padding:'14px 24px', borderTop:'1px solid var(--line)', background:'var(--surface-2)', display:'flex', justifyContent:'space-between', alignItems:'center', gap:12 } },
+        React.createElement('div', { style:{ fontSize:11.5, color:'var(--ink-3)', fontFamily:'Geist Mono, monospace' } },
+          'press ', React.createElement('span', { style:{ padding:'1px 5px', border:'1px solid var(--line-2)', borderRadius:3 } }, 'esc'), ' to close'
+        ),
+        React.createElement('div', { style:{ fontSize:11.5, color:'var(--ink-4)', fontFamily:'Geist Mono, monospace' } }, progId+' / '+vendor.vendor_id)
+      )
+    )
+  );
+}
+
+/* ── App root ────────────────────────────────────────────────────── */
+function App() {
+  var _view = useState('config'); var view = _view[0]; var setView = _view[1];
+  var _run = useState(null); var run = _run[0]; var setRun = _run[1];
+  var _progs = useState([]); var programmes = _progs[0]; var setProgrammes = _progs[1];
+
+  function loadProgrammes() {
+    fetch('/api/programmes')
+      .then(function(r){ return r.json(); })
+      .then(function(data){ setProgrammes(data||[]); })
+      .catch(function(){});
+  }
+
+  useEffect(function() { loadProgrammes(); }, []);
+
+  function handleStart(cfg) {
+    var fd = new FormData();
+    fd.append('programme_id', cfg.progId);
+    fd.append('own_company', cfg.company);
+    fd.append('vendor_list', cfg.vendorFile, cfg.vendorFile.name);
+    if (cfg.docs) cfg.docs.forEach(function(f){ fd.append('documents', f, f.name); });
+
+    fetch('/api/run', { method:'POST', body:fd })
+      .then(function(r){ return r.json(); })
+      .then(function(data) {
+        if (data.error) { alert('Error: '+data.error); return; }
+        setRun({ progId:data.programme_id, company:cfg.company, runId:data.run_id });
+        setView('progress');
+      })
+      .catch(function(e){ alert('Failed to start pipeline: '+e.message); });
+  }
+
+  function handleComplete() {
+    loadProgrammes();
+    setView('results');
+  }
+
+  function handleSelectProgramme(p) {
+    setRun({ progId:p.programme_id, company:'', runId:null });
+    setView('results');
+  }
+
+  return React.createElement('div', { style:{ display:'flex', height:'100vh', overflow:'hidden' } },
+    React.createElement(Sidebar, {
+      view:view,
+      programmes:programmes,
+      activeId:run && run.progId,
+      onNewRun:function(){ setView('config'); },
+      onSelectProgramme:handleSelectProgramme,
+    }),
+    React.createElement('main', { style:{ flex:1, overflowY:'auto', background:'var(--bg)' } },
+      view==='config' && React.createElement(ConfigView, { onStart:handleStart }),
+      view==='progress' && run && React.createElement(ProgressView, {
+        progId:run.progId,
+        company:run.company,
+        runId:run.runId,
+        onNewRun:function(){ setView('config'); },
+        onComplete:handleComplete,
+      }),
+      view==='results' && run && React.createElement(ResultsView, {
+        progId:run.progId,
+        company:run.company||'',
+        onNewRun:function(){ setView('config'); },
+      })
+    )
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(App));
+</script>
+</body>
+</html>

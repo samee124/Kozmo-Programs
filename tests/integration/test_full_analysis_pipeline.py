@@ -186,24 +186,30 @@ def _stub_narrative_bundle() -> NarrativeBundle:
 
 @pytest.fixture()
 def an_workspace(tmp_path, monkeypatch):
-    """Minimal workspace: entity.md CONFIRMED + rs_profile.md present."""
+    """Minimal workspace: entity.md CONFIRMED + consolidated profile with relationship: data."""
     monkeypatch.setenv("WORKSPACE_ROOT", str(tmp_path))
     monkeypatch.setenv("DATABASE_URL", "")  # disable DB
     monkeypatch.setattr("cobalt.core.file_system.WORKSPACE_ROOT", tmp_path)
 
     vendor_dir = tmp_path / _PROG / _VENDOR
     (vendor_dir / "identity").mkdir(parents=True)
-    (vendor_dir / "profile").mkdir(parents=True)
 
     (vendor_dir / "identity" / "entity.md").write_text(
         "---\nstatus: CONFIRMED\nvendor_name: IntegVendor\n---\n\n",
         encoding="utf-8",
     )
-    (vendor_dir / "profile" / "relationship_spend_profile.md").write_text(
-        f"---\nvendor_id: {_VENDOR}\nprogramme_id: {_PROG}\n"
-        "last_updated: 2019-01-01T00:00:00+00:00\n"
-        "pcs_total: 0.50\nrelationship_type: TRANSACTIONAL\n"
-        "dependency_tier: TIER_2\n---\n\n",
+    # Consolidated profile — Gate 2 reads relationship: key from this file
+    (vendor_dir / f"{_VENDOR}_profile.md").write_text(
+        f"---\nstatus: RS_COMPLETED\nvendor_name: IntegVendor\n"
+        f"enrichment: null\n"
+        f"relationship:\n"
+        f"  vendor_id: {_VENDOR}\n"
+        f"  programme_id: {_PROG}\n"
+        f"  last_updated: 2019-01-01T00:00:00+00:00\n"
+        f"  pcs_total: 0.50\n"
+        f"  relationship_type: TRANSACTIONAL\n"
+        f"  dependency_tier: TIER_2\n"
+        f"---\n\n",
         encoding="utf-8",
     )
     return tmp_path
@@ -302,7 +308,7 @@ class TestGroupBGateChecks:
 
         result = run_analysis(_VENDOR, _PROG)
         assert result.status == ANRunStatus.BLOCKED.value
-        assert result.error == "entity_not_confirmed"
+        assert result.error == "entity_file_missing"
 
     def test_b2_unconfirmed_entity_blocked(self, an_workspace, stub_all_tools):
         ep = an_workspace / _PROG / _VENDOR / "identity" / "entity.md"

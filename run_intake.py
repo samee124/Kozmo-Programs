@@ -1,3 +1,23 @@
+"""CLI runner for the Cobalt pipeline.
+
+All values are read from environment variables or passed as CLI args.
+For the interactive web UI use run_server.py instead.
+
+Usage:
+    python run_intake.py \
+        --programme  Sales-Q3-2026 \
+        --vendor-list C:/path/to/vendors.xlsx \
+        --documents  C:/path/to/docs \
+        --own-company "Kozmo Programs"
+
+Env vars (override defaults):
+    COBALT_PROGRAMME_ID   — programme id
+    COBALT_VENDOR_LIST    — path to vendor list CSV/XLSX
+    COBALT_DOCUMENTS_PATH — path to documents folder
+    COBALT_OWN_COMPANY    — your company name
+    COBALT_USER_ID        — user id (default: user001)
+"""
+
 import sys
 import os
 import shutil

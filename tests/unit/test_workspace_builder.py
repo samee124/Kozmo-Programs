@@ -135,13 +135,13 @@ def test_build_workspace_confirmed_creates_single_file(tmp_workspace):
 def test_build_workspace_file_named_by_slug(tmp_workspace):
     bw = build_workspace(make_confirmed(canonical_name="IBM Corporation"), "prog-1")
     md_files = list(bw.workspace_path.glob("*.md"))
-    assert md_files[0].name == "ibm.md"
+    assert md_files[0].name == "ibm_profile.md"
 
 
-def test_build_workspace_no_subdirectories(tmp_workspace):
+def test_build_workspace_creates_plans_subdirectory(tmp_workspace):
     bw = build_workspace(make_confirmed(), "prog-1")
-    subdirs = [p for p in bw.workspace_path.iterdir() if p.is_dir()]
-    assert subdirs == []
+    subdir_names = {p.name for p in bw.workspace_path.iterdir() if p.is_dir()}
+    assert "plans" in subdir_names
 
 
 # ---------------------------------------------------------------------------
@@ -324,10 +324,12 @@ def test_document_content_has_doc_type(tmp_workspace):
 # files_written tracking
 # ---------------------------------------------------------------------------
 
-def test_files_written_contains_single_entry(tmp_workspace):
+def test_files_written_contains_two_entries(tmp_workspace):
     bw = build_workspace(make_confirmed(), "prog-1")
-    assert len(bw.files_written) == 1
-    assert bw.files_written[0].endswith(".md")
+    assert len(bw.files_written) == 2
+    assert all(f.endswith(".md") for f in bw.files_written)
+    names = {Path(f).name for f in bw.files_written}
+    assert "investigation_plan.md" in names
 
 
 # ---------------------------------------------------------------------------

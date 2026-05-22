@@ -30,9 +30,14 @@ def _write_entity(path: Path, status: str = "CONFIRMED") -> None:
     path.write_text(content, encoding="utf-8")
 
 
-def _write_rs_profile(path: Path, last_updated: str, pcs_total: float = 0.6) -> None:
+def _write_consolidated_profile(path: Path, last_updated: str, pcs_total: float = 0.6) -> None:
+    """Write a consolidated {vendor}_profile.md with nested relationship: key."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    data = {"last_updated": last_updated, "pcs_total": pcs_total}
+    data = {
+        "status": "RS_COMPLETED",
+        "enrichment": None,
+        "relationship": {"last_updated": last_updated, "pcs_total": pcs_total},
+    }
     content = f"---\n{yaml.dump(data)}---\n"
     path.write_text(content, encoding="utf-8")
 
@@ -64,13 +69,12 @@ def test_gate_no_data_available(tmp_path, monkeypatch):
     ep = tmp_path / "PROG-001" / "V-001" / "entity.md"
     _write_entity(ep, status="CONFIRMED")
     with patch("cobalt.orchestrator.rs_orchestrator.entity_path", return_value=ep):
-        with patch("cobalt.orchestrator.rs_orchestrator.vendor_profile_path", return_value=tmp_path / "x.md"):
-            result = _check_gates(
-                "V-001", "PROG-001",
-                uploaded_files=[],
-                checkin_data=None,
-                connector_config=None,
-            )
+        result = _check_gates(
+            "V-001", "PROG-001",
+            uploaded_files=[],
+            checkin_data=None,
+            connector_config=None,
+        )
     assert result is not None
     assert result.status == RSRunStatus.SKIPPED.value
     assert result.skip_reason == "no_data_available"
@@ -83,20 +87,19 @@ def test_gate_profile_fresh_skips(tmp_path, monkeypatch):
     ep = tmp_path / "PROG-001" / "V-001" / "entity.md"
     _write_entity(ep, status="CONFIRMED")
 
-    rp = tmp_path / "PROG-001" / "V-001" / "relationship_spend_profile.md"
-    # Fresh profile — 1 day old
+    # Write consolidated profile with fresh relationship.last_updated
+    cp = tmp_path / "PROG-001" / "V-001" / "V-001_profile.md"
     now = datetime.now(timezone.utc).isoformat()
-    _write_rs_profile(rp, last_updated=now)
+    _write_consolidated_profile(cp, last_updated=now)
 
     with patch("cobalt.orchestrator.rs_orchestrator.entity_path", return_value=ep):
-        with patch("cobalt.orchestrator.rs_orchestrator.vendor_profile_path", return_value=tmp_path / "x.md"):
-            with patch("cobalt.orchestrator.rs_orchestrator.rs_profile_path", return_value=rp):
-                result = _check_gates(
-                    "V-001", "PROG-001",
-                    uploaded_files=[{"path": str(tmp_path / "file.csv")}],
-                    checkin_data=None,
-                    connector_config=None,
-                )
+        with patch("cobalt.orchestrator.rs_orchestrator._find_vendor_file", return_value=cp):
+            result = _check_gates(
+                "V-001", "PROG-001",
+                uploaded_files=[{"path": str(tmp_path / "file.csv")}],
+                checkin_data=None,
+                connector_config=None,
+            )
     assert result is not None
     assert result.status == RSRunStatus.SKIPPED.value
     assert result.skip_reason == "profile_fresh"
@@ -108,14 +111,12 @@ def test_gate_passes_when_confirmed_with_checkin(tmp_path, monkeypatch):
     _write_entity(ep, status="CONFIRMED")
 
     with patch("cobalt.orchestrator.rs_orchestrator.entity_path", return_value=ep):
-        with patch("cobalt.orchestrator.rs_orchestrator.vendor_profile_path", return_value=tmp_path / "x.md"):
-            with patch("cobalt.orchestrator.rs_orchestrator.rs_profile_path", return_value=tmp_path / "y.md"):
-                result = _check_gates(
-                    "V-001", "PROG-001",
-                    uploaded_files=None,
-                    checkin_data={"spend_ytd": "10000"},
-                    connector_config=None,
-                )
+        result = _check_gates(
+            "V-001", "PROG-001",
+            uploaded_files=None,
+            checkin_data={"spend_ytd": "10000"},
+            connector_config=None,
+        )
     assert result is None  # gates passed
 
 
@@ -151,29 +152,21 @@ def test_run_rs_completed_happy_path(confirmed_entity):
     mock_outcome = _make_mock_outcome("COMPLETED")
 
     with patch("cobalt.orchestrator.rs_orchestrator.entity_path", return_value=ep):
-        with patch("cobalt.orchestrator.rs_orchestrator.vendor_profile_path", return_value=tmp_path / "x.md"):
-            with patch("cobalt.orchestrator.rs_orchestrator.rs_profile_path", return_value=tmp_path / "y.md"):
-                with patch("cobalt.orchestrator.rs_orchestrator.RuntimeEngine") as MockEngine:
-                    mock_engine_instance = MagicMock()
-                    mock_engine_instance.execute_workflow.return_value = mock_outcome
-                    MockEngine.return_value = mock_engine_instance
-                    with patch("cobalt.orchestrator.rs_orchestrator._build_rs_workflow") as mock_wf:
-                        mock_wf_obj = MagicMock()
-                        mock_wf_obj.workflow_id = "wf-rs-V-001-123"
-                        mock_wf.return_value = mock_wf_obj
-                        with patch("cobalt.orchestrator.rs_orchestrator._update_programme_logs"):
-                            with patch("cobalt.orchestrator.rs_orchestrator._build_rs_step_registry"):
-                                # Inject profile into run_cache via side effect
-                                original_build = __import__(
-                                    "cobalt.orchestrator.rs_orchestrator",
-                                    fromlist=["_build_rs_step_registry"]
-                                )._build_rs_step_registry
-
-                                result = run_rs(
-                                    vendor_id="V-001",
-                                    programme_id="PROG-001",
-                                    checkin_data={"spend_ytd": "10000"},
-                                )
+        with patch("cobalt.orchestrator.rs_orchestrator.RuntimeEngine") as MockEngine:
+            mock_engine_instance = MagicMock()
+            mock_engine_instance.execute_workflow.return_value = mock_outcome
+            MockEngine.return_value = mock_engine_instance
+            with patch("cobalt.orchestrator.rs_orchestrator._build_rs_workflow") as mock_wf:
+                mock_wf_obj = MagicMock()
+                mock_wf_obj.workflow_id = "wf-rs-V-001-123"
+                mock_wf.return_value = mock_wf_obj
+                with patch("cobalt.orchestrator.rs_orchestrator._update_programme_logs"):
+                    with patch("cobalt.orchestrator.rs_orchestrator._build_rs_step_registry"):
+                        result = run_rs(
+                            vendor_id="V-001",
+                            programme_id="PROG-001",
+                            checkin_data={"spend_ytd": "10000"},
+                        )
 
     # With empty run_cache and COMPLETED status — falls to FAILED because profile is None
     assert result.status in (RSRunStatus.COMPLETED.value, RSRunStatus.FAILED.value)
@@ -193,8 +186,7 @@ def test_run_rs_skipped_no_data(tmp_path, monkeypatch):
     _write_entity(ep, status="CONFIRMED")
 
     with patch("cobalt.orchestrator.rs_orchestrator.entity_path", return_value=ep):
-        with patch("cobalt.orchestrator.rs_orchestrator.vendor_profile_path", return_value=tmp_path / "x.md"):
-            result = run_rs("V-001", "PROG-001")
+        result = run_rs("V-001", "PROG-001")
 
     assert result.status == RSRunStatus.SKIPPED.value
     assert result.skip_reason == "no_data_available"
@@ -207,18 +199,16 @@ def test_run_rs_engine_crash_returns_failed(tmp_path, monkeypatch):
     _write_entity(ep, status="CONFIRMED")
 
     with patch("cobalt.orchestrator.rs_orchestrator.entity_path", return_value=ep):
-        with patch("cobalt.orchestrator.rs_orchestrator.vendor_profile_path", return_value=tmp_path / "x.md"):
-            with patch("cobalt.orchestrator.rs_orchestrator.rs_profile_path", return_value=tmp_path / "y.md"):
-                with patch("cobalt.orchestrator.rs_orchestrator.RuntimeEngine", side_effect=RuntimeError("engine crash")):
-                    with patch("cobalt.orchestrator.rs_orchestrator._build_rs_workflow") as mock_wf:
-                        mock_wf_obj = MagicMock()
-                        mock_wf_obj.workflow_id = "wf-test"
-                        mock_wf.return_value = mock_wf_obj
-                        with patch("cobalt.orchestrator.rs_orchestrator._update_programme_logs"):
-                            result = run_rs(
-                                "V-001", "PROG-001",
-                                checkin_data={"spend_ytd": "5000"},
-                            )
+        with patch("cobalt.orchestrator.rs_orchestrator.RuntimeEngine", side_effect=RuntimeError("engine crash")):
+            with patch("cobalt.orchestrator.rs_orchestrator._build_rs_workflow") as mock_wf:
+                mock_wf_obj = MagicMock()
+                mock_wf_obj.workflow_id = "wf-test"
+                mock_wf.return_value = mock_wf_obj
+                with patch("cobalt.orchestrator.rs_orchestrator._update_programme_logs"):
+                    result = run_rs(
+                        "V-001", "PROG-001",
+                        checkin_data={"spend_ytd": "5000"},
+                    )
 
     assert result.status == RSRunStatus.FAILED.value
     assert "engine crash" in (result.error or "")

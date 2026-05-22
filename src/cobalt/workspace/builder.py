@@ -89,6 +89,53 @@ def _compute_pcs(erp_signal: ErpSignal | None, extracted_terms: dict | None) -> 
 
 
 # ---------------------------------------------------------------------------
+# _write_investigation_plan_file  (called by build_workspace)
+# ---------------------------------------------------------------------------
+
+def _write_investigation_plan_file(
+    result: IntakeResult,
+    vendor_id: str,
+    programme_id: str,
+    workspace_path: Path,
+    canonical_name: str,
+) -> Path:
+    """Write plans/investigation_plan.md into the vendor workspace (P1)."""
+    plan = result.investigation_plan
+    plans_dir = workspace_path / "plans"
+    plans_dir.mkdir(parents=True, exist_ok=True)
+    path = plans_dir / "investigation_plan.md"
+
+    depth = plan.depth.value if hasattr(plan.depth, "value") else str(plan.depth)
+    fraud = plan.fraud_risk.value if hasattr(plan.fraud_risk, "value") else str(plan.fraud_risk)
+    fm: dict = {
+        "plan_type":          "investigation",
+        "vendor_id":          vendor_id,
+        "candidate_key":      result.raw_input,
+        "depth":              depth,
+        "steps":              list(plan.steps),
+        "fraud_risk":         fraud,
+        "require_human_gate": plan.require_human_gate,
+        "reason":             plan.reason,
+        "focus":              getattr(plan, "focus", "") or "",
+        "planned_at":         _now_iso(),
+    }
+    fm_yaml = yaml.dump(fm, default_flow_style=False, allow_unicode=True)
+    body = f"\n# Investigation Plan — {canonical_name}\n"
+    if plan.reason:
+        body += f"\n{plan.reason}\n"
+    focus = getattr(plan, "focus", "")
+    if focus:
+        body += f"\n**Focus:** {focus}\n"
+    atomic_write(
+        path,
+        f"---\n{fm_yaml}---\n{body}",
+        vendor_id=vendor_id,
+        programme_id=programme_id,
+    )
+    return path
+
+
+# ---------------------------------------------------------------------------
 # build_workspace
 # ---------------------------------------------------------------------------
 
@@ -183,7 +230,9 @@ def build_workspace(
 
     data: dict = {
         "vendor_id": vendor_id,
+        "vendor_name": canonical_name,
         "canonical_name": canonical_name,
+        "programme_id": programme_id,
         "slug": slug,
         "status": "INTAKE_COMPLETED",
         "intake": {
@@ -202,7 +251,10 @@ def build_workspace(
         "change_log": change_log,
     }
 
-    file_path = workspace_path / f"{slug}.md"
+    data["enrichment"] = None
+    data["relationship"] = None
+
+    file_path = workspace_path / f"{slug}_profile.md"
     fm_yaml = yaml.dump(data, default_flow_style=False, allow_unicode=True)
     body = f"\n# {canonical_name}\n\nWorkspace created at intake completion.\n"
     atomic_write(
@@ -222,10 +274,13 @@ def build_workspace(
         identity_confidence=result.confidence or 0.0,
     )
 
+    # Write plans/investigation_plan.md
+    ip_path = _write_investigation_plan_file(result, vendor_id, programme_id, workspace_path, canonical_name)
+
     return WorkspaceBuildResult(
         success=True,
         workspace_path=workspace_path,
-        files_written=[str(file_path)],
+        files_written=[str(file_path), str(ip_path)],
     )
 
 
@@ -239,44 +294,101 @@ def write_vendor_profile(
     vendor_id: str,
     workspace_root: Path,
 ) -> Path:
-    """Update (or create) the vendor .md file with enrichment profile data."""
+    """Merge P2 enrichment data into the consolidated {slug}_profile.md.
+
+    Reads the existing consolidated file, sets the enrichment: key to the full
+    profile dict, updates status and change_log, then writes back atomically.
+    Returns the path to the consolidated file.
+    """
     from cobalt.core.file_system import _find_vendor_file, read_md
 
-    file_path = _find_vendor_file(programme_id, vendor_id, workspace_root)
-    if file_path is None:
-        vendor_dir = Path(workspace_root) / programme_id / vendor_id
-        vendor_dir.mkdir(parents=True, exist_ok=True)
-        slug = re.sub(r"[^a-z0-9_]", "_", vendor_id.lower().lstrip("v-"))
-        file_path = vendor_dir / f"{slug or 'vendor'}_profile.md"
-
-    existing = read_md(file_path) or {}
+    vendor_dir = Path(workspace_root) / programme_id / vendor_id
+    vendor_dir.mkdir(parents=True, exist_ok=True)
 
     profile_data = profile.to_dict() if hasattr(profile, "to_dict") else {}
+    canonical = getattr(profile, "canonical_name", vendor_id)
+    now = getattr(profile, "enriched_at", None) or _now_iso()
+    profile_status = getattr(profile, "profile_status", "ENRICHED")
+    pcs_meta = getattr(profile, "enrichment_metadata", {}) or {}
 
-    updated = {**existing, **profile_data}
-    # Expose profile_status as top-level status so callers can check fm["status"]
-    updated["status"] = getattr(profile, "profile_status", updated.get("status", ""))
+    # Find (or default-name) the consolidated profile file
+    existing_path = _find_vendor_file(programme_id, vendor_id, workspace_root)
+    if existing_path is None:
+        existing_path = vendor_dir / f"{vendor_id}_profile.md"
 
-    change_log = list(updated.get("change_log") or [])
+    existing = read_md(existing_path) or {}
+
+    change_log = list(existing.get("change_log") or [])
     change_log.append({
         "event": "ENRICHMENT_COMPLETED",
-        "enriched_at": getattr(profile, "enriched_at", _now_iso()),
-        "profile_status": getattr(profile, "profile_status", ""),
-        "pcs_before": (getattr(profile, "enrichment_metadata", {}) or {}).get("pcs_before", 0),
-        "pcs_after": (getattr(profile, "enrichment_metadata", {}) or {}).get("pcs_after", 0),
+        "enriched_at": now,
+        "profile_status": profile_status,
+        "pcs_before": pcs_meta.get("pcs_before", 0),
+        "pcs_after": pcs_meta.get("pcs_after", 0),
     })
-    updated["change_log"] = change_log
+    existing["status"] = profile_status
+    existing["change_log"] = change_log
+    existing["enrichment"] = profile_data
 
-    fm_yaml = yaml.dump(updated, default_flow_style=False, allow_unicode=True)
-    canonical = getattr(profile, "canonical_name", vendor_id)
-    body = f"\n# {canonical}\n\nEnrichment profile.\n"
+    fm_yaml = yaml.dump(existing, default_flow_style=False, allow_unicode=True)
+    intake_canonical = existing.get("canonical_name", canonical)
     atomic_write(
-        file_path,
-        f"---\n{fm_yaml}---\n{body}",
+        existing_path,
+        f"---\n{fm_yaml}---\n\n# {intake_canonical}\n\nUpdated by P2 enrichment at {now}.\n",
         vendor_id=vendor_id,
         programme_id=programme_id,
     )
-    return file_path
+
+    return existing_path
+
+
+# ---------------------------------------------------------------------------
+# write_rs_profile  (Process 3 — relationship & spend)
+# ---------------------------------------------------------------------------
+
+def write_rs_profile(
+    relationship_data: dict,
+    programme_id: str,
+    vendor_id: str,
+) -> Path:
+    """Merge P3 relationship & spend data into the consolidated {slug}_profile.md.
+
+    Reads the existing consolidated file, sets the relationship: key to the
+    provided dict, updates status and change_log, then writes back atomically.
+    Returns the path to the consolidated file.
+    """
+    from cobalt.core.file_system import _find_vendor_file, read_md
+
+    existing_path = _find_vendor_file(programme_id, vendor_id)
+    if existing_path is None:
+        vendor_dir = _ws_root() / programme_id / vendor_id
+        vendor_dir.mkdir(parents=True, exist_ok=True)
+        existing_path = vendor_dir / f"{vendor_id}_profile.md"
+
+    existing = read_md(existing_path) or {}
+    now = relationship_data.get("last_updated") or _now_iso()
+
+    change_log = list(existing.get("change_log") or [])
+    change_log.append({
+        "event": "RS_COMPLETED",
+        "rs_completed_at": now,
+        "profile_status": relationship_data.get("profile_status"),
+        "pcs_total": relationship_data.get("pcs_total"),
+    })
+    existing["status"] = "RS_COMPLETED"
+    existing["change_log"] = change_log
+    existing["relationship"] = relationship_data
+
+    intake_canonical = existing.get("canonical_name", vendor_id)
+    fm_yaml = yaml.dump(existing, default_flow_style=False, allow_unicode=True)
+    atomic_write(
+        existing_path,
+        f"---\n{fm_yaml}---\n\n# {intake_canonical}\n\nUpdated by P3 relationship & spend at {now}.\n",
+        vendor_id=vendor_id,
+        programme_id=programme_id,
+    )
+
+    return existing_path
 
 
 # ---------------------------------------------------------------------------
