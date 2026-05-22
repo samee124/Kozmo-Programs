@@ -127,11 +127,11 @@ def _upload_to_blob(
         if not is_configured():
             return
 
+        import os
+        user_id = user_id or os.getenv("COBALT_USER_ID")
         if not user_id or not programme_id:
             logger.debug("_upload_to_blob: user_id or programme_id not provided — skipping blob upload for %s", path)
             return
-
-        import os
         workspace_root = os.getenv("WORKSPACE_ROOT", "./workspace")
         abs_workspace = Path(workspace_root).resolve()
         try:

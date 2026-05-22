@@ -496,6 +496,19 @@ def run_rs(
     if gate_result is not None:
         return gate_result
 
+    # Write per-vendor P3 plan
+    try:
+        from cobalt.agents.planning_agent import PlanningAgent as _PA
+        _PA().write_vendor_p3_plan(
+            programme_id=programme_id,
+            vendor_id=vendor_id,
+            uploaded_files=uploaded_files,
+            checkin_data=checkin_data,
+            connector_config=connector_config,
+        )
+    except Exception as _p3_exc:
+        logger.warning("P3 vendor plan write failed for %s: %s", vendor_id, _p3_exc)
+
     # Load entity + known_facts
     entity_profile = _read_md_frontmatter(entity_path(programme_id, vendor_id))
     vp = vendor_profile_path(programme_id, vendor_id)
@@ -656,6 +669,18 @@ def run_rs_all_confirmed(
     if not vendor_ids:
         logger.warning("No vendors found for RS pipeline — programme %s", programme_id)
         return []
+
+    try:
+        from cobalt.agents.planning_agent import PlanningAgent
+        PlanningAgent().write_rs_plan(
+            programme_id,
+            vendor_ids,
+            uploaded_files=kwargs.get("uploaded_files"),
+            checkin_data=kwargs.get("checkin_data"),
+            connector_config=kwargs.get("connector_config"),
+        )
+    except Exception as exc:
+        logger.warning("RS plan write failed: %s", exc)
 
     logger.info("RS pipeline: processing %d vendors for programme %s", len(vendor_ids), programme_id)
     results: list[RSRunResult] = []

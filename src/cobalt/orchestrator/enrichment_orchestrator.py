@@ -431,6 +431,19 @@ def run_enrichment(
         return result
 
     # ----------------------------------------------------------------
+    # Write per-vendor P2 plan
+    # ----------------------------------------------------------------
+    try:
+        planning_agent_tmp = PlanningAgent()
+        planning_agent_tmp.write_vendor_p2_plan(
+            programme_id=programme_id,
+            vendor_id=vendor_id,
+            depth_tier=declared_depth,
+        )
+    except Exception as _p2_exc:
+        logger.warning("P2 vendor plan write failed for %s: %s", vendor_id, _p2_exc)
+
+    # ----------------------------------------------------------------
     # Create ENRICHMENT workflow via PlanningAgent
     # ----------------------------------------------------------------
     planning_agent = PlanningAgent()
@@ -555,6 +568,11 @@ def enrich_all_confirmed(
         "Enriching %d CONFIRMED vendors for programme %s",
         len(confirmed_vendor_ids), programme_id,
     )
+
+    try:
+        PlanningAgent().write_enrichment_plan(programme_id, confirmed_vendor_ids, declared_depth)
+    except Exception as exc:
+        logger.warning("Enrichment plan write failed: %s", exc)
 
     results: list[EnrichmentRunResult] = []
     for idx, vendor_id in enumerate(confirmed_vendor_ids, start=1):

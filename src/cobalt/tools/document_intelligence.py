@@ -9,7 +9,6 @@ DocumentIntelligenceResult in memory. Never raises.
 
 from __future__ import annotations
 
-import json
 import logging
 import re
 from pathlib import Path
@@ -35,30 +34,24 @@ _TYPE_PATTERNS: list[tuple[str, re.Pattern]] = [
     (DocumentType.COMPLIANCE.value,  re.compile(r"certificate|certification|iso \d{4,5}|compliance cert", re.I)),
 ]
 
-_LLM_PROMPT_TEMPLATE = """\
-You are extracting contract terms from a {document_type} document for procurement records.
-Extract the following fields and return as JSON only.
-Return null for any field not present in the document — do not infer or guess values.
-
-Fields to extract:
-- effective_date: ISO date string (YYYY-MM-DD) or null
-- expiry_date: ISO date string (YYYY-MM-DD) or null
-- auto_renews: boolean (true/false) or null
-- notice_period_days: integer (number of days) or null
-- total_value: float (numeric value only, no currency symbol) or null
-- currency: 3-letter ISO currency code or null
-- payment_terms_days: integer (e.g. 30 for "Net 30") or null
-- governing_law: string (jurisdiction name) or null
-- termination_clauses: list of strings (one sentence each) or []
-- key_obligations: list of strings (one sentence each) or []
-- sla_summary: string (one sentence) or null
-
-Document type: {document_type}
-Document text:
-{text}
-
-Return only the JSON object. No explanation.\
-"""
+_EXTRACT_SYSTEM = (
+    "You are extracting contract terms from a procurement document for a spend management system. "
+    "Extract the following fields and return as a JSON object only. "
+    "Return null for any field not present in the document — do not infer or guess values.\n\n"
+    "Fields to extract:\n"
+    "- effective_date: ISO date string (YYYY-MM-DD) or null\n"
+    "- expiry_date: ISO date string (YYYY-MM-DD) or null\n"
+    "- auto_renews: boolean (true/false) or null\n"
+    "- notice_period_days: integer (number of days) or null\n"
+    "- total_value: float (numeric value only, no currency symbol) or null\n"
+    "- currency: 3-letter ISO currency code or null\n"
+    "- payment_terms_days: integer (e.g. 30 for Net 30) or null\n"
+    "- governing_law: string (jurisdiction name) or null\n"
+    "- termination_clauses: list of strings (one sentence each) or []\n"
+    "- key_obligations: list of strings (one sentence each) or []\n"
+    "- sla_summary: string (one sentence) or null\n\n"
+    "Return only the JSON object. No explanation."
+)
 
 _ISO_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
@@ -121,26 +114,12 @@ def _extract_contract_terms(
     """Call LLM to extract contract terms. Returns (ContractTerms, warnings)."""
     warnings: list[str] = []
 
-    prompt = _LLM_PROMPT_TEMPLATE.format(
-        document_type=document_type,
-        text=doc_text[:6000],
-    )
+    prompt = f"Document type: {document_type}\n\nDocument text:\n{doc_text[:12000]}"
 
     try:
-        response = llm_call(
-            messages=[{"role": "user", "content": prompt}],
-            model="gpt-4o",
-            temperature=0,
-            max_tokens=1000,
-        )
-        raw_text = response.strip()
-        # Strip markdown code fences if present
-        if raw_text.startswith("```"):
-            raw_text = re.sub(r"^```[^\n]*\n?", "", raw_text)
-            raw_text = re.sub(r"\n?```$", "", raw_text.strip())
-        parsed = json.loads(raw_text)
+        parsed = llm_call(prompt=prompt, system=_EXTRACT_SYSTEM, expect_json=True)
     except Exception as exc:
-        logger.debug("LLM extraction failed for %s: %s", document_id, exc)
+        logger.warning("LLM extraction failed for %s: %s", document_id, exc)
         warnings.append(f"LLM_EXTRACTION_FAILED_{document_id}")
         return ContractTerms(
             document_id=document_id,

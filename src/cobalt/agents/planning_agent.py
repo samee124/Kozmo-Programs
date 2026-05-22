@@ -278,6 +278,109 @@ class PlanningAgent:
         return path
 
     # ------------------------------------------------------------------
+    # Public: write_enrichment_plan
+    # ------------------------------------------------------------------
+
+    def write_enrichment_plan(
+        self,
+        programme_id: str,
+        vendor_ids: list[str],
+        depth_tier: str = "STANDARD",
+    ) -> Path:
+        """Write enrichment_plan.md. No LLM — purely structural."""
+        plan_context = {
+            "planned_at": datetime.now(tz=timezone.utc).isoformat(),
+            "vendor_ids": vendor_ids,
+            "depth_tier": depth_tier,
+        }
+        path = _pw.write_enrichment_plan(programme_id, plan_context)
+        logger.info("Enrichment plan written -> %s", path)
+        return path
+
+    # ------------------------------------------------------------------
+    # Public: write_rs_plan
+    # ------------------------------------------------------------------
+
+    def write_rs_plan(
+        self,
+        programme_id: str,
+        vendor_ids: list[str],
+        uploaded_files: list[dict] | None = None,
+        checkin_data: dict | None = None,
+        connector_config: dict | None = None,
+    ) -> Path:
+        """Write rs_plan.md. No LLM — purely structural."""
+        plan_context = {
+            "planned_at": datetime.now(tz=timezone.utc).isoformat(),
+            "vendor_ids": vendor_ids,
+            "has_documents": bool(uploaded_files),
+            "has_checkin": bool(checkin_data),
+            "has_connector": bool(connector_config),
+        }
+        path = _pw.write_rs_plan(programme_id, plan_context)
+        logger.info("RS plan written -> %s", path)
+        return path
+
+    # ------------------------------------------------------------------
+    # Public: write_vendor_p1_plan / p2_plan / p3_plan
+    # ------------------------------------------------------------------
+
+    def write_vendor_p1_plan(
+        self,
+        programme_id: str,
+        vendor_id: str,
+        decision: str = "CONFIRMED",
+        confidence: float = 0.0,
+        data_class: str = "CLASS_C",
+        fraud_risk: str = "LOW",
+    ) -> Path:
+        """Write per-vendor P1 plan. No LLM."""
+        plan_context = {
+            "planned_at": datetime.now(tz=timezone.utc).isoformat(),
+            "decision": decision,
+            "confidence": confidence,
+            "data_class": data_class,
+            "fraud_risk": fraud_risk,
+        }
+        path = _pw.write_vendor_p1_plan(programme_id, vendor_id, plan_context)
+        logger.info("Vendor P1 plan written → %s", path)
+        return path
+
+    def write_vendor_p2_plan(
+        self,
+        programme_id: str,
+        vendor_id: str,
+        depth_tier: str = "STANDARD",
+    ) -> Path:
+        """Write per-vendor P2 enrichment plan. No LLM."""
+        plan_context = {
+            "planned_at": datetime.now(tz=timezone.utc).isoformat(),
+            "depth_tier": depth_tier,
+        }
+        path = _pw.write_vendor_p2_plan(programme_id, vendor_id, plan_context)
+        logger.info("Vendor P2 plan written → %s", path)
+        return path
+
+    def write_vendor_p3_plan(
+        self,
+        programme_id: str,
+        vendor_id: str,
+        uploaded_files: list[dict] | None = None,
+        checkin_data: dict | None = None,
+        connector_config: dict | None = None,
+    ) -> Path:
+        """Write per-vendor P3 RS plan. No LLM."""
+        plan_context = {
+            "planned_at": datetime.now(tz=timezone.utc).isoformat(),
+            "has_documents": bool(uploaded_files),
+            "has_checkin": bool(checkin_data),
+            "has_connector": bool(connector_config),
+        }
+        path = _pw.write_vendor_p3_plan(programme_id, vendor_id, plan_context)
+        logger.info("Vendor P3 plan written → %s", path)
+        return path
+
+    # ------------------------------------------------------------------
     # Public: write_investigation_plan
     # ------------------------------------------------------------------
 

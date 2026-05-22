@@ -200,6 +200,20 @@ def decide_and_create(
             workspace_path = str(build_result.workspace_path)
             logger.info("  Workspace created → %s  (%d files)", workspace_path, len(files_written))
 
+            # Write per-vendor P1 plan
+            try:
+                from cobalt.agents.planning_agent import PlanningAgent
+                PlanningAgent().write_vendor_p1_plan(
+                    programme_id=programme_id,
+                    vendor_id=vendor_id,
+                    decision=status,
+                    confidence=confidence,
+                    data_class=data_class,
+                    fraud_risk=fraud_risk_val,
+                )
+            except Exception as _plan_exc:
+                logger.warning("P1 plan write failed for %s: %s", vendor_id, _plan_exc)
+
         # Step 7 — return EntityDecision
         return EntityDecision(
             vendor_id=vendor_id,

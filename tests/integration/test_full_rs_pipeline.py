@@ -325,7 +325,7 @@ def test_document_intelligence_feeds_contract_to_classifier(tmp_path, workspace_
     doc_path = tmp_path / "contract.txt"
     doc_path.write_text("Contract text " * 30, encoding="utf-8")  # > 100 chars
 
-    llm_response = json.dumps({
+    llm_response = {
         "effective_date": "2023-01-01",
         "expiry_date": "2025-01-01",
         "auto_renews": True,
@@ -337,7 +337,7 @@ def test_document_intelligence_feeds_contract_to_classifier(tmp_path, workspace_
         "termination_clauses": ["90 days notice"],
         "key_obligations": ["Provide services"],
         "sla_summary": "99% uptime",
-    })
+    }
 
     with patch("cobalt.tools.document_intelligence.llm_call", return_value=llm_response):
         doc_result = document_intelligence.process_documents(

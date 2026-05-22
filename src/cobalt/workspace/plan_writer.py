@@ -37,6 +37,14 @@ def _now_iso() -> str:
     return datetime.now(tz=timezone.utc).isoformat()
 
 
+def _programme_id_from_path(path: Path) -> str | None:
+    """Extract programme_id from a workspace path (first component after ws_root)."""
+    try:
+        return path.relative_to(_ws_root()).parts[0]
+    except (ValueError, IndexError):
+        return None
+
+
 def _parse_file(path: Path) -> tuple[dict, str] | None:
     if not path.exists():
         return None
@@ -51,7 +59,7 @@ def _parse_file(path: Path) -> tuple[dict, str] | None:
 def _write_file(path: Path, fm: dict, body: str) -> None:
     fm_yaml = yaml.dump(fm, default_flow_style=False, allow_unicode=True)
     content = f"---\n{fm_yaml}---\n{body}"
-    atomic_write(path, content)
+    atomic_write(path, content, programme_id=_programme_id_from_path(path))
 
 
 # ---------------------------------------------------------------------------
@@ -78,7 +86,7 @@ def write_programme_plan(programme_id: str, plan_context: dict) -> Path:
     )
 
     fm_yaml = yaml.dump(fm, default_flow_style=False, allow_unicode=True)
-    atomic_write(path, f"---\n{fm_yaml}---\n{body}")
+    atomic_write(path, f"---\n{fm_yaml}---\n{body}", programme_id=_programme_id_from_path(path))
     return path
 
 
@@ -187,7 +195,7 @@ def write_investigation_plan(
     )
 
     fm_yaml = yaml.dump(fm, default_flow_style=False, allow_unicode=True)
-    atomic_write(path, f"---\n{fm_yaml}---\n{body}")
+    atomic_write(path, f"---\n{fm_yaml}---\n{body}", programme_id=_programme_id_from_path(path))
     return path
 
 
@@ -278,6 +286,248 @@ def finalise_plan(
         )
 
     _write_file(path, fm, body)
+
+
+# ---------------------------------------------------------------------------
+# write_enrichment_plan
+# ---------------------------------------------------------------------------
+
+_P2_STEPS = [
+    "web_search",
+    "gleif",
+    "wikidata",
+    "opencorporates",
+    "opensanctions",
+    "llm_synthesis",
+    "profile_write",
+]
+
+_P3_STEPS = [
+    "structured_data_collector",
+    "document_intelligence",
+    "spend_aggregator",
+    "relationship_classifier",
+    "rs_profile_assembler",
+]
+
+
+def write_enrichment_plan(programme_id: str, plan_context: dict) -> Path:
+    """Write workspace/{programme_id}/programme_run/enrichment_plan.md."""
+    root = _ws_root() / programme_id / "programme_run"
+    path = root / "enrichment_plan.md"
+
+    created_at = plan_context.get("planned_at") or _now_iso()
+    vendor_ids: list[str] = plan_context.get("vendor_ids", [])
+    depth_tier: str = plan_context.get("depth_tier", "STANDARD")
+
+    fm: dict = {
+        "programme_id": programme_id,
+        "process": "P2_ENRICHMENT",
+        "created_at": created_at,
+        "vendor_count": len(vendor_ids),
+        "depth_tier": depth_tier,
+        "vendors": vendor_ids,
+        "status": "PLANNED",
+    }
+
+    step_checkboxes = "\n".join(f"- [ ] `{s}`" for s in _P2_STEPS)
+    vendor_list_md = "\n".join(f"- {v}" for v in vendor_ids) or "— none —"
+
+    body = (
+        f"\n# Enrichment Plan — {programme_id}\n\n"
+        f"## Vendors to Enrich ({len(vendor_ids)})\n\n{vendor_list_md}\n\n"
+        f"## Steps (per vendor)\n\n{step_checkboxes}\n"
+    )
+
+    fm_yaml = yaml.dump(fm, default_flow_style=False, allow_unicode=True)
+    atomic_write(path, f"---\n{fm_yaml}---\n{body}", programme_id=_programme_id_from_path(path))
+    return path
+
+
+# ---------------------------------------------------------------------------
+# write_rs_plan
+# ---------------------------------------------------------------------------
+
+
+def write_rs_plan(programme_id: str, plan_context: dict) -> Path:
+    """Write workspace/{programme_id}/programme_run/rs_plan.md."""
+    root = _ws_root() / programme_id / "programme_run"
+    path = root / "rs_plan.md"
+
+    created_at = plan_context.get("planned_at") or _now_iso()
+    vendor_ids: list[str] = plan_context.get("vendor_ids", [])
+    has_documents: bool = plan_context.get("has_documents", False)
+    has_checkin: bool = plan_context.get("has_checkin", False)
+    has_connector: bool = plan_context.get("has_connector", False)
+
+    fm: dict = {
+        "programme_id": programme_id,
+        "process": "P3_RS",
+        "created_at": created_at,
+        "vendor_count": len(vendor_ids),
+        "vendors": vendor_ids,
+        "data_sources": {
+            "documents": has_documents,
+            "checkin": has_checkin,
+            "connector": has_connector,
+        },
+        "status": "PLANNED",
+    }
+
+    sources = []
+    if has_documents:
+        sources.append("Documents (PDF/contract)")
+    if has_checkin:
+        sources.append("Check-in data")
+    if has_connector:
+        sources.append("ERP/AP connector")
+    sources_md = ", ".join(sources) or "— none configured —"
+
+    step_checkboxes = "\n".join(f"- [ ] `{s}`" for s in _P3_STEPS)
+    vendor_list_md = "\n".join(f"- {v}" for v in vendor_ids) or "— none —"
+
+    body = (
+        f"\n# Relationship & Spend Plan — {programme_id}\n\n"
+        f"## Data Sources\n\n{sources_md}\n\n"
+        f"## Vendors to Process ({len(vendor_ids)})\n\n{vendor_list_md}\n\n"
+        f"## Steps (per vendor)\n\n{step_checkboxes}\n"
+    )
+
+    fm_yaml = yaml.dump(fm, default_flow_style=False, allow_unicode=True)
+    atomic_write(path, f"---\n{fm_yaml}---\n{body}", programme_id=_programme_id_from_path(path))
+    return path
+
+
+# ---------------------------------------------------------------------------
+# write_vendor_p1_plan / p2_plan / p3_plan  (per-vendor plan files)
+# ---------------------------------------------------------------------------
+
+_P1_STEPS = [
+    "source_intake",
+    "candidate_screening",
+    "entity_resolution",
+    "external_validation",
+    "entity_decision_and_shell_creation",
+]
+
+
+def write_vendor_p1_plan(programme_id: str, vendor_id: str, plan_context: dict) -> Path:
+    """Write workspace/{programme_id}/{vendor_id}/plan/p1_plan.md."""
+    plan_dir = _ws_root() / programme_id / vendor_id / "plan"
+    plan_dir.mkdir(parents=True, exist_ok=True)
+    path = plan_dir / "p1_plan.md"
+
+    created_at = plan_context.get("planned_at") or _now_iso()
+    decision = plan_context.get("decision", "CONFIRMED")
+    confidence = plan_context.get("confidence", 0.0)
+    data_class = plan_context.get("data_class", "CLASS_C")
+    fraud_risk = plan_context.get("fraud_risk", "LOW")
+
+    fm: dict = {
+        "programme_id": programme_id,
+        "vendor_id": vendor_id,
+        "process": "P1_IDENTIFICATION",
+        "created_at": created_at,
+        "decision": decision,
+        "confidence": confidence,
+        "data_class": data_class,
+        "fraud_risk": fraud_risk,
+        "status": "COMPLETED",
+    }
+
+    step_checkboxes = "\n".join(f"- [x] `{s}`" for s in _P1_STEPS)
+
+    body = (
+        f"\n# P1 Identification Plan — {vendor_id}\n\n"
+        f"## Decision\n\n"
+        f"**Status:** {decision}\n"
+        f"**Confidence:** {confidence:.2f}\n"
+        f"**Data Class:** {data_class}\n"
+        f"**Fraud Risk:** {fraud_risk}\n\n"
+        f"## Steps\n\n{step_checkboxes}\n"
+    )
+
+    fm_yaml = yaml.dump(fm, default_flow_style=False, allow_unicode=True)
+    atomic_write(path, f"---\n{fm_yaml}---\n{body}", programme_id=_programme_id_from_path(path))
+    return path
+
+
+def write_vendor_p2_plan(programme_id: str, vendor_id: str, plan_context: dict) -> Path:
+    """Write workspace/{programme_id}/{vendor_id}/plan/p2_plan.md."""
+    plan_dir = _ws_root() / programme_id / vendor_id / "plan"
+    plan_dir.mkdir(parents=True, exist_ok=True)
+    path = plan_dir / "p2_plan.md"
+
+    created_at = plan_context.get("planned_at") or _now_iso()
+    depth_tier = plan_context.get("depth_tier", "STANDARD")
+
+    fm: dict = {
+        "programme_id": programme_id,
+        "vendor_id": vendor_id,
+        "process": "P2_ENRICHMENT",
+        "created_at": created_at,
+        "depth_tier": depth_tier,
+        "status": "PLANNED",
+    }
+
+    step_checkboxes = "\n".join(f"- [ ] `{s}`" for s in _P2_STEPS)
+
+    body = (
+        f"\n# P2 Enrichment Plan — {vendor_id}\n\n"
+        f"## Settings\n\n"
+        f"**Depth Tier:** {depth_tier}\n\n"
+        f"## Steps\n\n{step_checkboxes}\n"
+    )
+
+    fm_yaml = yaml.dump(fm, default_flow_style=False, allow_unicode=True)
+    atomic_write(path, f"---\n{fm_yaml}---\n{body}", programme_id=_programme_id_from_path(path))
+    return path
+
+
+def write_vendor_p3_plan(programme_id: str, vendor_id: str, plan_context: dict) -> Path:
+    """Write workspace/{programme_id}/{vendor_id}/plan/p3_plan.md."""
+    plan_dir = _ws_root() / programme_id / vendor_id / "plan"
+    plan_dir.mkdir(parents=True, exist_ok=True)
+    path = plan_dir / "p3_plan.md"
+
+    created_at = plan_context.get("planned_at") or _now_iso()
+    has_documents = plan_context.get("has_documents", False)
+    has_checkin = plan_context.get("has_checkin", False)
+    has_connector = plan_context.get("has_connector", False)
+
+    sources = []
+    if has_documents:
+        sources.append("documents")
+    if has_checkin:
+        sources.append("checkin")
+    if has_connector:
+        sources.append("connector")
+
+    fm: dict = {
+        "programme_id": programme_id,
+        "vendor_id": vendor_id,
+        "process": "P3_RS",
+        "created_at": created_at,
+        "data_sources": {
+            "documents": has_documents,
+            "checkin": has_checkin,
+            "connector": has_connector,
+        },
+        "status": "PLANNED",
+    }
+
+    step_checkboxes = "\n".join(f"- [ ] `{s}`" for s in _P3_STEPS)
+    sources_md = ", ".join(sources) or "— none configured —"
+
+    body = (
+        f"\n# P3 Relationship & Spend Plan — {vendor_id}\n\n"
+        f"## Data Sources\n\n{sources_md}\n\n"
+        f"## Steps\n\n{step_checkboxes}\n"
+    )
+
+    fm_yaml = yaml.dump(fm, default_flow_style=False, allow_unicode=True)
+    atomic_write(path, f"---\n{fm_yaml}---\n{body}", programme_id=_programme_id_from_path(path))
+    return path
 
 
 # ---------------------------------------------------------------------------

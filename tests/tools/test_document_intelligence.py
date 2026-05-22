@@ -57,7 +57,7 @@ def _make_terms(
     )
 
 
-_LLM_RESPONSE = json.dumps({
+_LLM_RESPONSE = {
     "effective_date": "2024-01-01",
     "expiry_date": "2025-01-01",
     "auto_renews": True,
@@ -69,7 +69,7 @@ _LLM_RESPONSE = json.dumps({
     "termination_clauses": ["30 days written notice"],
     "key_obligations": ["Deliver monthly reports"],
     "sla_summary": "99.9% uptime",
-})
+}
 
 
 # ---------------------------------------------------------------------------
@@ -303,12 +303,11 @@ def test_process_documents_truncated_file_is_low_confidence(tmp_path):
     assert result.extracted_contracts[0].extraction_confidence == "LOW"
 
 
-def test_process_documents_markdown_strip_code_fence(tmp_path):
+def test_process_documents_md_file_extracted(tmp_path):
     doc = tmp_path / "contract.md"
     doc.write_text("Y" * 300, encoding="utf-8")
 
-    fenced = f"```json\n{_LLM_RESPONSE}\n```"
-    with patch("cobalt.tools.document_intelligence.llm_call", return_value=fenced):
+    with patch("cobalt.tools.document_intelligence.llm_call", return_value=_LLM_RESPONSE):
         result = process_documents("V-001", "PROG-001", [str(doc)])
 
     assert len(result.extracted_contracts) == 1
