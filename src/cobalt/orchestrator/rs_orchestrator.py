@@ -16,10 +16,9 @@ from pathlib import Path
 
 from cobalt.core.atomic_write import append_md
 from cobalt.core.file_system import (
+    _find_vendor_file,
     entity_path,
     programme_run_path,
-    rs_profile_path,
-    vendor_profile_path,
 )
 from cobalt.core.staleness import is_stale
 from cobalt.models.schemas.rs_schema import (
@@ -106,22 +105,19 @@ def _read_md_frontmatter(path: Path) -> dict:
 
 
 def _read_pcs(programme_id: str, vendor_id: str) -> float:
-    """Read current PCS from rs_profile or vendor_profile. Returns 0.0 if unavailable."""
-    from cobalt.core.file_system import vendor_profile_path as vpp
-    rp = rs_profile_path(programme_id, vendor_id)
-    if rp.exists():
-        data = _read_md_frontmatter(rp)
-        val = data.get("pcs_total")
-        if val is not None:
-            return float(val)
-    vp = vpp(programme_id, vendor_id)
-    if vp.exists():
-        data = _read_md_frontmatter(vp)
+    """Read current PCS from consolidated profile's relationship: key. Returns 0.0 if unavailable."""
+    from cobalt.core.file_system import _find_vendor_file
+    vf = _find_vendor_file(programme_id, vendor_id)
+    if vf and vf.exists():
+        data = _read_md_frontmatter(vf)
+        rel = data.get("relationship") or {}
+        pcs_total = rel.get("pcs_total")
+        if pcs_total is not None:
+            return float(pcs_total)
         pcs = data.get("pcs") or {}
         score = pcs.get("score")
         if score is not None:
             return float(score) / 100.0
-        return float(data.get("overall_pcs", 0.0))
     return 0.0
 
 
@@ -167,9 +163,13 @@ def _check_gates(
             error="entity_not_confirmed",
         )
 
-    # Gate 2: P2 profile — warn only, do not block
-    if not vendor_profile_path(programme_id, vendor_id).exists():
-        logger.warning("P2 profile missing for %s/%s — continuing without enrichment data", programme_id, vendor_id)
+    # Read consolidated profile for enrichment/relationship data
+    vf = _find_vendor_file(programme_id, vendor_id)
+    consolidated = _read_md_frontmatter(vf) if vf and vf.is_file() else {}
+
+    # Gate 2: P2 enrichment data — warn only, do not block
+    if not consolidated.get("enrichment"):
+        logger.warning("P2 enrichment data missing for %s/%s — continuing without enrichment data", programme_id, vendor_id)
 
     # Gate 3: Data available
     has_data = bool(
@@ -189,22 +189,20 @@ def _check_gates(
             error=None,
         )
 
-    # Gate 4: Profile freshness (< 30 days old)
-    rp = rs_profile_path(programme_id, vendor_id)
-    if rp.exists():
-        data = _read_md_frontmatter(rp)
-        last_updated = data.get("last_updated")
-        if last_updated and not is_stale(last_updated, PROFILE_MAX_AGE_DAYS):
-            return RSRunResult(
-                vendor_id=vendor_id,
-                programme_id=programme_id,
-                status=RSRunStatus.SKIPPED.value,
-                pcs_before=_read_pcs(programme_id, vendor_id), pcs_after=None,
-                tools_run=[], flags_raised=[],
-                profile_status=None,
-                skip_reason="profile_fresh",
-                error=None,
-            )
+    # Gate 4: Profile freshness (< 30 days old) — check relationship.last_updated
+    rel_data = consolidated.get("relationship") or {}
+    last_updated = rel_data.get("last_updated")
+    if last_updated and not is_stale(last_updated, PROFILE_MAX_AGE_DAYS):
+        return RSRunResult(
+            vendor_id=vendor_id,
+            programme_id=programme_id,
+            status=RSRunStatus.SKIPPED.value,
+            pcs_before=_read_pcs(programme_id, vendor_id), pcs_after=None,
+            tools_run=[], flags_raised=[],
+            profile_status=None,
+            skip_reason="profile_fresh",
+            error=None,
+        )
 
     return None  # All gates passed
 
@@ -438,6 +436,60 @@ def _build_rs_workflow(vendor_id: str, programme_id: str, context: dict) -> Work
 
 
 # ---------------------------------------------------------------------------
+# Vendor-level plan write
+# ---------------------------------------------------------------------------
+
+def _write_rs_plan(
+    programme_id: str,
+    vendor_id: str,
+    result: RSRunResult,
+    profile: object,
+    now: str,
+) -> None:
+    """Write plans/rs_plan.md into the vendor workspace (P3)."""
+    try:
+        import os as _os
+        import yaml as _yaml
+        from cobalt.core.atomic_write import atomic_write
+        from cobalt.core.file_system import vendor_path
+
+        plans_dir = vendor_path(programme_id, vendor_id) / "plans"
+        plans_dir.mkdir(parents=True, exist_ok=True)
+        path = plans_dir / "rs_plan.md"
+
+        rel_type      = getattr(profile, "relationship_type", None) or "UNKNOWN"
+        dep_tier      = getattr(profile, "dependency_tier", None) or "UNKNOWN"
+        dep_score     = getattr(profile, "dependency_score", None)
+        contract_cov  = getattr(profile, "contract_coverage", None) or "UNCOVERED"
+        single_source = getattr(profile, "single_source_risk", False)
+
+        fm: dict = {
+            "plan_type":          "rs",
+            "vendor_id":          vendor_id,
+            "relationship_type":  rel_type,
+            "dependency_tier":    dep_tier,
+            "dependency_score":   dep_score,
+            "contract_coverage":  contract_cov,
+            "single_source_risk": single_source,
+            "profile_status":     result.profile_status,
+            "pcs_before":         result.pcs_before,
+            "pcs_after":          result.pcs_after,
+            "flags":              result.flags_raised,
+            "planned_at":         now,
+        }
+        fm_yaml = _yaml.dump(fm, default_flow_style=False, allow_unicode=True)
+        body = (
+            f"\n# Relationship & Spend Plan — {vendor_id}\n\n"
+            f"Relationship: **{rel_type}**  "
+            f"Dependency tier: **{dep_tier}**  "
+            f"Contract coverage: {contract_cov}\n"
+        )
+        atomic_write(path, f"---\n{fm_yaml}---\n{body}", vendor_id=vendor_id, programme_id=programme_id)
+    except Exception as exc:
+        logger.warning("rs_plan write failed for %s/%s: %s", programme_id, vendor_id, exc)
+
+
+# ---------------------------------------------------------------------------
 # Programme-level outputs
 # ---------------------------------------------------------------------------
 
@@ -496,10 +548,9 @@ def run_rs(
     if gate_result is not None:
         return gate_result
 
-    # Load entity + known_facts
+    # Load entity + known_facts (enrichment data is nested under entity_profile)
     entity_profile = _read_md_frontmatter(entity_path(programme_id, vendor_id))
-    vp = vendor_profile_path(programme_id, vendor_id)
-    known_facts = _read_md_frontmatter(vp) if vp.exists() else {}
+    known_facts = entity_profile.get("enrichment") or {}
 
     # Extract document paths from uploaded_files
     document_paths = [
@@ -617,6 +668,8 @@ def run_rs(
         )
 
     _update_programme_logs(programme_id, vendor_id, result)
+    if result.status == RSRunStatus.COMPLETED.value and profile is not None:
+        _write_rs_plan(programme_id, vendor_id, result, profile, _now_iso())
     return result
 
 

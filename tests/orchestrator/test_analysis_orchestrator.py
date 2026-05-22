@@ -197,11 +197,19 @@ def _write_entity(ws: Path, status: str = "CONFIRMED") -> None:
 
 
 def _write_rs_profile(ws: Path, last_updated: str = "2019-01-01T00:00:00+00:00") -> None:
-    rp = ws / _PROG / _VENDOR / "profile" / "relationship_spend_profile.md"
+    # Write a consolidated profile file in the vendor root with relationship: data
+    rp = ws / _PROG / _VENDOR / f"{_VENDOR}_profile.md"
     rp.write_text(
-        f"---\nvendor_id: {_VENDOR}\nprogramme_id: {_PROG}\n"
-        f"last_updated: {last_updated}\npcs_total: 0.5\n"
-        f"relationship_type: TRANSACTIONAL\ndependency_tier: TIER_3\n---\n\n",
+        f"---\nstatus: RS_COMPLETED\nvendor_name: TestVendor\n"
+        f"enrichment: null\n"
+        f"relationship:\n"
+        f"  vendor_id: {_VENDOR}\n"
+        f"  programme_id: {_PROG}\n"
+        f"  last_updated: {last_updated}\n"
+        f"  pcs_total: 0.5\n"
+        f"  relationship_type: TRANSACTIONAL\n"
+        f"  dependency_tier: TIER_3\n"
+        f"---\n\n",
         encoding="utf-8",
     )
 
@@ -222,17 +230,17 @@ def _write_analysis_result(ws: Path, last_analysed: str) -> None:
 
 class TestGateChecksBlocked:
     def test_no_entity_md(self, ws):
-        _write_rs_profile(ws)
+        # No profile file at all → Gate 1 blocks
         result = mod.run_analysis(_VENDOR, _PROG)
         assert result.status == ANRunStatus.BLOCKED.value
-        assert result.error == "entity_not_confirmed"
+        assert result.error == "entity_file_missing"
 
     def test_entity_not_confirmed(self, ws):
         _write_entity(ws, status="TRIAGE")
         _write_rs_profile(ws)
         result = mod.run_analysis(_VENDOR, _PROG)
         assert result.status == ANRunStatus.BLOCKED.value
-        assert result.error == "entity_not_confirmed"
+        assert result.error == "intake_status_triage"
 
     def test_entity_pending(self, ws):
         _write_entity(ws, status="PENDING")
@@ -247,13 +255,15 @@ class TestGateChecksBlocked:
         assert result.error == "rs_profile_missing"
 
     def test_blocked_has_no_cri_score(self, ws):
-        _write_rs_profile(ws)
+        # Has entity but no relationship: key → Gate 2 blocks
+        _write_entity(ws)
         result = mod.run_analysis(_VENDOR, _PROG)
         assert result.cri_score is None
         assert result.pcs_before is None
 
     def test_blocked_returns_an_run_result(self, ws):
-        _write_rs_profile(ws)
+        # Has entity but no relationship: key → Gate 2 blocks
+        _write_entity(ws)
         result = mod.run_analysis(_VENDOR, _PROG)
         assert isinstance(result, ANRunResult)
         assert result.tools_run == []

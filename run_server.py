@@ -44,6 +44,7 @@ _LABELS: dict[str, tuple[str, str]] = {
     "cobalt.orchestrator.enrichment_orchestrator":     ("Enrichment",              "orchestrator"),
     "cobalt.orchestrator.rs_orchestrator":             ("RS Pipeline",             "orchestrator"),
     "cobalt.orchestrator.analysis_orchestrator":       ("Analysis",                "orchestrator"),
+    "cobalt.orchestrator.pa_orchestrator":             ("Plan & Actions",          "orchestrator"),
     # Agents
     "cobalt.agents.planning_agent":                    ("Planning Agent",          "agent"),
     "cobalt.agents.research_agent":                    ("Research Agent",          "agent"),
@@ -69,6 +70,11 @@ _LABELS: dict[str, tuple[str, str]] = {
     "cobalt.tools.trend_analyser":                     ("P4-T5 · Trend",           "tool"),
     "cobalt.tools.finding_engine":                     ("P4-T6 · Findings",        "tool"),
     "cobalt.tools.narrative_engine":                   ("P4-T7 · Narrative",       "tool"),
+    # P5 Tools (Plan & Actions)
+    "cobalt.tools.action_planner":                     ("P5-T1 · Action Planner",  "tool"),
+    "cobalt.tools.task_manager":                       ("P5-T2 · Task Manager",    "tool"),
+    "cobalt.tools.communication_composer":             ("P5-T3 · Comms Composer",  "tool"),
+    "cobalt.tools.execution_monitor":                  ("P5-T4 · Exec Monitor",    "tool"),
     # Skills (utility modules)
     "cobalt.core.name_matching":                       ("name_matching",           "skill"),
     "cobalt.core.confidence_scorer":                   ("confidence_scorer",       "skill"),
@@ -203,7 +209,7 @@ def _pipeline_thread(
         ev("step", step="rs", status="done", progress=75,
            completed=done_rs, total=len(rs_results))
 
-        # Step 4 — Analysis & Intelligence (isolated: failure here does not abort pipeline)
+        # Step 4 — Analysis & Intelligence (isolated: failure does not abort pipeline)
         # force=True: UI-triggered pipeline always re-analyses regardless of freshness gate
         try:
             from cobalt.orchestrator.analysis_orchestrator import run_analysis_all_confirmed
@@ -211,15 +217,35 @@ def _pipeline_thread(
             an_results = run_analysis_all_confirmed(programme_id=programme_id, force=True)
             done_an    = sum(1 for r in an_results if r.status == "COMPLETED")
             skipped_an = sum(1 for r in an_results if r.status == "SKIPPED")
-            ev("step", step="analysis", status="done", progress=100,
+            ev("step", step="analysis", status="done", progress=88,
                completed=done_an, skipped=skipped_an, total=len(an_results))
         except Exception as an_exc:
             import traceback
-            ev("step", step="analysis", status="error", progress=100)
+            ev("step", step="analysis", status="error", progress=88)
             ev("log", level="ERROR", label="Analysis", entry_type="orchestrator",
                msg=f"Analysis step failed: {an_exc}",
                ts=datetime.now().strftime("%H:%M:%S"))
             logging.getLogger("cobalt").error("Analysis step exception: %s", traceback.format_exc())
+
+        # Step 5 — Plan & Actions (isolated: failure does not abort pipeline)
+        # force=True: always re-plans on UI-triggered runs
+        try:
+            from cobalt.orchestrator.pa_orchestrator import run_plan_all_confirmed
+            ev("step", step="pa", status="running", progress=90)
+            pa_results    = run_plan_all_confirmed(programme_id=programme_id, force=True)
+            done_pa       = sum(1 for r in pa_results if r.status == "COMPLETED")
+            skipped_pa    = sum(1 for r in pa_results if r.status == "SKIPPED")
+            escalated_pa  = sum(1 for r in pa_results if r.escalation_required)
+            ev("step", step="pa", status="done", progress=100,
+               completed=done_pa, skipped=skipped_pa, escalated=escalated_pa,
+               total=len(pa_results))
+        except Exception as pa_exc:
+            import traceback
+            ev("step", step="pa", status="error", progress=100)
+            ev("log", level="ERROR", label="Plan & Actions", entry_type="orchestrator",
+               msg=f"Plan & Actions step failed: {pa_exc}",
+               ts=datetime.now().strftime("%H:%M:%S"))
+            logging.getLogger("cobalt").error("PA step exception: %s", traceback.format_exc())
 
         ev("pipeline_done")
 
@@ -232,7 +258,12 @@ def _pipeline_thread(
 # ── Routes ─────────────────────────────────────────────────────────────────────
 @app.route("/")
 def index():
-    return send_from_directory("static", "index.html")
+    return send_from_directory("static", "Kozmo_Workspace.html")
+
+
+@app.route("/workflow")
+def workflow():
+    return send_from_directory("static", "Kozmo_workflow.html")
 
 
 @app.route("/api/programmes")
@@ -384,6 +415,14 @@ def api_programme_vendors(programme_id: str):
             except Exception:
                 pass
 
+        # Check enrichment/relationship sections in the consolidated profile
+        _main_fm: dict = {}
+        if main_md and main_md.exists():
+            try:
+                _parts2 = main_md.read_text(encoding="utf-8").split("---\n", 2)
+                _main_fm = _yaml.safe_load(_parts2[1]) if len(_parts2) >= 3 else {}
+            except Exception:
+                pass
         out.append({
             "vendor_id":   vid,
             "vendor_name": name,
@@ -393,14 +432,235 @@ def api_programme_vendors(programme_id: str):
             "health_band": health_band,
             "files": {
                 "main":           main_md is not None,
-                "vendor_profile": (vdir / "profile" / "vendor_profile.md").exists(),
-                "rs_profile":     (vdir / "profile" / "relationship_spend_profile.md").exists(),
+                "vendor_profile": bool((_main_fm or {}).get("enrichment")),
+                "rs_profile":     bool((_main_fm or {}).get("relationship")),
                 "analysis":       analysis_md.exists(),
+                "action_plan":    (vdir / "action_plan.md").exists(),
                 "ledger":         (vdir / "execution" / "ledger.md").exists(),
             },
         })
 
     return jsonify(out)
+
+
+@app.route("/api/programmes/<path:programme_id>/vendors/<path:vendor_id>")
+def api_vendor_detail(programme_id: str, vendor_id: str):
+    """Return full vendor detail — all workspace files aggregated into one JSON object."""
+    import json as _json
+    import yaml
+    workspace = Path(os.getenv("WORKSPACE_ROOT", "./workspace"))
+    vdir = workspace / programme_id / vendor_id
+
+    if not vdir.is_dir():
+        return jsonify({"error": "vendor not found"}), 404
+
+    def _read_yaml_md(path: Path) -> dict:
+        if not path.exists():
+            return {}
+        try:
+            parts = path.read_text(encoding="utf-8").split("---\n", 2)
+            return yaml.safe_load(parts[1]) or {} if len(parts) >= 3 else {}
+        except Exception:
+            return {}
+
+    def _read_json(path: Path):
+        if not path.exists():
+            return None
+        try:
+            return _json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            return None
+
+    def _read_md_body(path: Path) -> str:
+        if not path.exists():
+            return ""
+        try:
+            parts = path.read_text(encoding="utf-8").split("---\n", 2)
+            return parts[2].strip() if len(parts) >= 3 else path.read_text(encoding="utf-8").strip()
+        except Exception:
+            return ""
+
+    # ── 1. Consolidated profile — {slug}_profile.md (P1 + P2 + P3) ──────────
+    # Prefer *_profile.md; fall back to old {vendor_id}.md; skip known non-intake files.
+    _SKIP_MDS = {"action_plan.md", "analysis_result.md", "execution_state.md", "task_list.md"}
+    _new_profile = next(
+        (f for f in vdir.iterdir()
+         if f.suffix == ".md" and f.is_file() and f.name.endswith("_profile.md")),
+        None,
+    ) if vdir.is_dir() else None
+    if _new_profile is None:
+        _direct = vdir / f"{vendor_id}.md"
+        if _direct.is_file():
+            main_md = _direct
+        else:
+            main_md = next(
+                (f for f in vdir.iterdir() if f.suffix == ".md" and f.is_file() and f.name not in _SKIP_MDS),
+                None,
+            ) if vdir.is_dir() else None
+    else:
+        main_md = _new_profile
+
+    intake_fm = _read_yaml_md(main_md) if main_md else {}
+
+    # P2 enrichment and P3 relationship are nested keys in the consolidated profile
+    vp_fm = intake_fm.get("enrichment") or {}
+    rs_fm = intake_fm.get("relationship") or {}
+
+    # ── 4. Analysis — analysis_result.md (P4) ───────────────────────────────
+    an_fm   = _read_yaml_md(vdir / "analysis_result.md")
+    an_body = _read_md_body(vdir / "analysis_result.md")
+
+    # ── 5. History ──────────────────────────────────────────────────────────
+    score_hist     = _read_json(vdir / "history" / "score_history.json")
+    qa_hist        = _read_json(vdir / "history" / "qa_history.json")
+    evidence_state = _read_json(vdir / "history" / "evidence_state.json")
+    commercial_st  = _read_json(vdir / "history" / "commercial_state.json")
+    action_hist    = _read_json(vdir / "history" / "action_history.json")
+    plan_hist      = _read_json(vdir / "history" / "plan_history.json")
+
+    # ── 6. Execution (P5) ───────────────────────────────────────────────────
+    exec_fm    = _read_yaml_md(vdir / "execution_state.md")
+    plan_fm    = _read_yaml_md(vdir / "action_plan.md")
+    tasks_fm   = _read_yaml_md(vdir / "task_list.md")
+    ledger_txt = _read_md_body(vdir / "execution" / "ledger.md")
+
+    # ── 7. Plans ────────────────────────────────────────────────────────────
+    inv_plan = _read_yaml_md(vdir / "plans" / "investigation_plan.md")
+    enr_plan = _read_yaml_md(vdir / "plans" / "enrichment_plan.md")
+    rs_plan  = _read_yaml_md(vdir / "plans" / "rs_plan.md")
+
+    # ── 8. Derive lifecycle_stage if P5 hasn't run yet ──────────────────────
+    lifecycle_stage = exec_fm.get("lifecycle_stage")
+    if not lifecycle_stage:
+        if (vdir / "analysis_result.md").exists():
+            lifecycle_stage = "P4_COMPLETE"
+        elif rs_fm:
+            lifecycle_stage = "P3_COMPLETE"
+        elif vp_fm:
+            lifecycle_stage = "P2_COMPLETE"
+        else:
+            lifecycle_stage = "P1_COMPLETE"
+
+    # ── 9. Files present flags ──────────────────────────────────────────────
+    files = {
+        "main":           main_md is not None,
+        "vendor_profile": bool(vp_fm),
+        "rs_profile":     bool(rs_fm),
+        "analysis":       (vdir / "analysis_result.md").exists(),
+        "action_plan":    (vdir / "action_plan.md").exists(),
+        "task_list":      (vdir / "task_list.md").exists(),
+        "ledger":         (vdir / "execution" / "ledger.md").exists(),
+    }
+
+    return jsonify({
+        "vendor_id":   vendor_id,
+        "programme_id": programme_id,
+        "lifecycle_stage": lifecycle_stage,
+        "files": files,
+
+        "identity": {
+            "vendor_id":      intake_fm.get("vendor_id") or vendor_id,
+            "vendor_name":    intake_fm.get("vendor_name") or intake_fm.get("canonical_name") or vendor_id,
+            "canonical_name": intake_fm.get("canonical_name") or vendor_id,
+            "programme_id":   intake_fm.get("programme_id") or programme_id,
+            "status":         intake_fm.get("status"),
+            "data_class":     (intake_fm.get("intake") or {}).get("data_class"),
+            "entity_type":    (intake_fm.get("intake") or {}).get("entity_type"),
+            "country_code":   (intake_fm.get("intake") or {}).get("country_code"),
+            "resolution_method": (intake_fm.get("intake") or {}).get("resolution_method"),
+            "confidence":     (intake_fm.get("intake") or {}).get("confidence"),
+            "financial":      intake_fm.get("financial"),
+            "legal":          intake_fm.get("legal"),
+            "classification": intake_fm.get("classification"),
+        },
+
+        "enrichment": {
+            "profile_status":     vp_fm.get("profile_status"),
+            "overall_confidence": vp_fm.get("overall_confidence"),
+            "enriched_at":        vp_fm.get("enriched_at"),
+            "depth_tier":         (vp_fm.get("enrichment_metadata") or {}).get("depth_tier"),
+            "identity":           vp_fm.get("identity"),
+            "classification":     vp_fm.get("classification"),
+            "size":               vp_fm.get("size"),
+            "organisation":       vp_fm.get("organisation"),
+            "certifications":     vp_fm.get("certifications") or [],
+            "products_and_services": vp_fm.get("products_and_services") or [],
+            "reputation_signals": vp_fm.get("reputation_signals") or [],
+            "lifecycle_signals":  vp_fm.get("lifecycle_signals") or [],
+            "flags":              vp_fm.get("flags") or [],
+            "gaps":               vp_fm.get("gaps"),
+        } if vp_fm else None,
+
+        "relationship": {
+            "relationship_type":  rs_fm.get("relationship_type"),
+            "dependency_tier":    rs_fm.get("dependency_tier"),
+            "spend_total_ttm_usd": rs_fm.get("spend_total_ttm_usd"),
+            "contract_count":     rs_fm.get("contract_count"),
+            "contract_coverage":  None,  # in body text
+            "pcs_contribution":   rs_fm.get("pcs_contribution"),
+            "pcs_total":          rs_fm.get("pcs_total"),
+            "flags":              rs_fm.get("flags") or [],
+            "profile_status":     rs_fm.get("profile_status") if "profile_status" in rs_fm else None,
+        } if rs_fm else None,
+
+        "analysis": {
+            "cri_score":       an_fm.get("cri_score"),
+            "health_band":     an_fm.get("health_band"),
+            "vendor_state":    an_fm.get("vendor_state"),
+            "finding_count":   an_fm.get("finding_count"),
+            "nba_action":      an_fm.get("nba_action"),
+            "last_analysed_at": an_fm.get("last_analysed_at"),
+            "flags":           an_fm.get("flags") or [],
+            "findings":        an_fm.get("findings") or [],
+            "body":            an_body,
+        } if an_fm else None,
+
+        "scores":          score_hist,
+        "qa":              qa_hist,
+        "evidence_state":  evidence_state,
+        "commercial_state": commercial_st,
+        "action_history":  action_hist,
+        "plan_history":    plan_hist,
+
+        "execution": {
+            "plan_id":           exec_fm.get("plan_id"),
+            "completion_pct":    exec_fm.get("completion_pct"),
+            "tasks_total":       exec_fm.get("tasks_total"),
+            "tasks_completed":   exec_fm.get("tasks_completed"),
+            "tasks_blocked":     exec_fm.get("tasks_blocked"),
+            "tasks_overdue":     exec_fm.get("tasks_overdue"),
+            "overdue_flag":      exec_fm.get("overdue_flag"),
+            "escalation_required": exec_fm.get("escalation_required"),
+            "escalation_reason": exec_fm.get("escalation_reason"),
+            "comms_pending_review": exec_fm.get("comms_pending_review"),
+            "closure_recommended": exec_fm.get("closure_recommended"),
+            "lifecycle_stage":   lifecycle_stage,
+            "stages_complete":   exec_fm.get("stages_complete") or [],
+            "task_statuses":     exec_fm.get("task_statuses") or [],
+            "last_checked_at":   exec_fm.get("last_checked_at"),
+        } if exec_fm else {"lifecycle_stage": lifecycle_stage, "stages_complete": []},
+
+        "action_plan": {
+            "plan_id":           plan_fm.get("plan_id"),
+            "plan_title":        plan_fm.get("plan_title"),
+            "plan_objective":    plan_fm.get("plan_objective"),
+            "selected_playbook": plan_fm.get("selected_playbook"),
+            "playbook_rationale": plan_fm.get("playbook_rationale"),
+            "confidence":        plan_fm.get("confidence"),
+            "created_at":        plan_fm.get("created_at"),
+            "steps":             plan_fm.get("steps") or [],
+        } if plan_fm else None,
+
+        "tasks": tasks_fm.get("tasks") or [] if tasks_fm else [],
+
+        "plans": {
+            "investigation": inv_plan or None,
+            "enrichment":    enr_plan or None,
+            "rs":            rs_plan  or None,
+        },
+
+        "ledger": ledger_txt,
+    })
 
 
 @app.route("/api/vendor-file")
@@ -416,16 +676,21 @@ def api_vendor_file():
     workspace = Path(os.getenv("WORKSPACE_ROOT", "./workspace"))
     vdir = workspace / programme_id / vendor_id
 
-    if file_type == "main":
+    if file_type in ("main", "vendor_profile", "rs_profile"):
+        # All three live in the consolidated *_profile.md
         target = next(
-            (f for f in vdir.iterdir() if f.suffix == ".md" and f.is_file()), None
+            (f for f in vdir.iterdir()
+             if f.suffix == ".md" and f.is_file() and f.name.endswith("_profile.md")),
+            None,
         ) if vdir.is_dir() else None
+        if target is None and vdir.is_dir():
+            target = next(
+                (f for f in vdir.iterdir() if f.suffix == ".md" and f.is_file()), None
+            )
     else:
         path_map = {
-            "vendor_profile": vdir / "profile" / "vendor_profile.md",
-            "rs_profile":     vdir / "profile" / "relationship_spend_profile.md",
-            "analysis":       vdir / "analysis_result.md",
-            "ledger":         vdir / "execution" / "ledger.md",
+            "analysis": vdir / "analysis_result.md",
+            "ledger":   vdir / "execution" / "ledger.md",
         }
         target = path_map.get(file_type)
 

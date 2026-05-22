@@ -17,7 +17,7 @@ from sqlalchemy import create_engine, update
 from sqlalchemy.orm import sessionmaker, Session
 
 from cobalt.core.file_system import read_md
-from cobalt.db.models import ProgrammeRun, VendorIntelligence
+from cobalt.db.models import ActionPlan, Communication, PlanTask, ProgrammeRun, VendorIntelligence
 from cobalt.db.queries import insert_vendor
 
 load_dotenv()
@@ -102,39 +102,6 @@ def _sync_action_queue(session: Session, data: dict, vendor_id: str) -> None:
             status=data.get("status"),
             next_action_due=_parse_datetime(data.get("next_action_due")),
             last_run_at=datetime.utcnow(),
-            updated_at=datetime.utcnow(),
-        )
-    )
-
-
-def _sync_vendor_profile(session: Session, data: dict, vendor_id: str) -> None:
-    """vendor_profile.md written → update P2 enrichment columns."""
-    session.execute(
-        update(VendorIntelligence)
-        .where(VendorIntelligence.vendor_id == vendor_id)
-        .values(
-            category=data.get("category"),
-            subcategory=data.get("subcategory"),
-            vendor_type=data.get("vendor_type"),
-            hq_country=data.get("hq_country"),
-            company_size_band=data.get("company_size_band"),
-            profile_status=data.get("profile_status"),
-            last_enriched_at=_parse_datetime(data.get("enriched_at")),
-            updated_at=datetime.utcnow(),
-        )
-    )
-
-
-def _sync_rs_profile(session: Session, data: dict, vendor_id: str) -> None:
-    """relationship_spend_profile.md written → update P3 relationship & spend columns."""
-    session.execute(
-        update(VendorIntelligence)
-        .where(VendorIntelligence.vendor_id == vendor_id)
-        .values(
-            rs_last_updated=_parse_datetime(data.get("last_updated")),
-            spend_total_usd=data.get("spend_total_ttm_usd"),
-            dependency_tier=data.get("dependency_tier"),
-            relationship_type=data.get("relationship_type"),
             updated_at=datetime.utcnow(),
         )
     )
@@ -267,6 +234,12 @@ def _sync_single_vendor_file(session: Session, data: dict, vendor_id: str, progr
     clf    = data.get("classification") or {}
     iden   = data.get("identity") or {}
     size   = data.get("size") or {}
+    # Nested P2 / P3 sections in the consolidated profile
+    enr    = data.get("enrichment") or {}
+    rel    = data.get("relationship") or {}
+    enr_iden = enr.get("identity") or {}
+    enr_size = enr.get("size") or {}
+    enr_clf  = enr.get("classification") or {}
 
     vendor_name = (
         data.get("canonical_name")
@@ -295,18 +268,29 @@ def _sync_single_vendor_file(session: Session, data: dict, vendor_id: str, progr
     _maybe("vendor_name",         vendor_name)
     _maybe("data_class",          data_class)
     _maybe("identity_confidence", id_conf)
-    _maybe("category",           (clf.get("category") or {}).get("value") or data.get("category"))
-    _maybe("subcategory",        (clf.get("subcategory") or {}).get("value") or data.get("subcategory"))
-    _maybe("vendor_type",        (clf.get("vendor_type") or {}).get("value") or data.get("vendor_type"))
-    _maybe("hq_country",         (iden.get("hq_country") or {}).get("value") or data.get("hq_country"))
-    _maybe("company_size_band",  (size.get("company_size_band") or {}).get("value") or data.get("company_size_band"))
-    _maybe("profile_status",     data.get("profile_status"))
-    _maybe("last_enriched_at",   _parse_datetime(data.get("enriched_at") or data.get("last_enriched_at")))
+    _maybe("category",           (clf.get("category") or {}).get("value")
+                                  or (enr_clf.get("category") or {}).get("value")
+                                  or data.get("category"))
+    _maybe("subcategory",        (clf.get("subcategory") or {}).get("value")
+                                  or (enr_clf.get("subcategory") or {}).get("value")
+                                  or data.get("subcategory"))
+    _maybe("vendor_type",        (clf.get("vendor_type") or {}).get("value")
+                                  or (enr_clf.get("vendor_type") or {}).get("value")
+                                  or data.get("vendor_type"))
+    _maybe("hq_country",         (iden.get("hq_country") or {}).get("value")
+                                  or (enr_iden.get("hq_country") or {}).get("value")
+                                  or data.get("hq_country"))
+    _maybe("company_size_band",  (size.get("company_size_band") or {}).get("value")
+                                  or (enr_size.get("company_size_band") or {}).get("value")
+                                  or data.get("company_size_band"))
+    _maybe("profile_status",     enr.get("profile_status") or data.get("profile_status"))
+    _maybe("last_enriched_at",   _parse_datetime(enr.get("enriched_at")
+                                  or data.get("enriched_at") or data.get("last_enriched_at")))
     _maybe("status",             data.get("status") or data.get("intake_status"))
-    _maybe("spend_total_usd",    data.get("spend_total_ttm_usd"))
-    _maybe("dependency_tier",    data.get("dependency_tier"))
-    _maybe("relationship_type",  data.get("relationship_type"))
-    _maybe("rs_last_updated",    _parse_datetime(data.get("rs_last_updated")))
+    _maybe("spend_total_usd",    rel.get("spend_total_ttm_usd") or data.get("spend_total_ttm_usd"))
+    _maybe("dependency_tier",    rel.get("dependency_tier") or data.get("dependency_tier"))
+    _maybe("relationship_type",  rel.get("relationship_type") or data.get("relationship_type"))
+    _maybe("rs_last_updated",    _parse_datetime(rel.get("last_updated") or data.get("rs_last_updated")))
 
     session.execute(
         update(VendorIntelligence)
@@ -316,20 +300,92 @@ def _sync_single_vendor_file(session: Session, data: dict, vendor_id: str, progr
     )
 
 
+def _sync_action_plan(session: Session, data: dict, vendor_id: str) -> None:
+    """action_plan.md written → upsert ActionPlan row."""
+    plan_id = data.get("plan_id")
+    if not plan_id:
+        return
+
+    from cobalt.db.queries import upsert_action_plan
+    upsert_action_plan(
+        session=session,
+        plan_id=plan_id,
+        vendor_id=vendor_id or "",
+        programme_id=data.get("programme_id"),
+        plan_title=data.get("plan_title"),
+        plan_objective=data.get("plan_objective"),
+        selected_playbook=data.get("selected_playbook"),
+        playbook_rationale=data.get("playbook_rationale"),
+        confidence=data.get("confidence"),
+        step_count=len(data.get("steps") or []),
+        status="ACTIVE",
+    )
+
+
+def _sync_task_list(session: Session, data: dict, vendor_id: str) -> None:
+    """task_list.md written → upsert one PlanTask row per task in the list."""
+    tasks = data.get("tasks") or []
+    if not tasks:
+        return
+
+    from cobalt.db.queries import upsert_plan_task
+    for task_data in tasks:
+        task_id = task_data.get("task_id")
+        if not task_id:
+            continue
+        upsert_plan_task(
+            session=session,
+            task_id=task_id,
+            plan_id=task_data.get("plan_id"),
+            vendor_id=vendor_id,
+            programme_id=task_data.get("programme_id"),
+            title=task_data.get("title"),
+            owner=task_data.get("owner"),
+            task_type=task_data.get("task_type"),
+            priority=task_data.get("priority"),
+            status=task_data.get("status", "PENDING"),
+            due_date=_parse_datetime(task_data.get("due_date")),
+            approval_required=bool(task_data.get("approval_required", False)),
+            blocked_flag=bool(task_data.get("blocked_flag", False)),
+        )
+
+
+def _sync_execution_state(session: Session, data: dict, vendor_id: str) -> None:
+    """execution_state.md written → update PlanTask statuses for overdue/blocked items."""
+    tasks = data.get("task_statuses") or []
+    if not tasks:
+        return
+
+    for task_data in tasks:
+        task_id = task_data.get("task_id")
+        if not task_id:
+            continue
+        session.execute(
+            update(PlanTask)
+            .where(PlanTask.task_id == task_id)
+            .values(
+                status=task_data.get("status"),
+                blocked_flag=bool(task_data.get("blocked_flag", False)),
+                updated_at=datetime.utcnow(),
+            )
+        )
+
+
 # ─── Handler registry ─────────────────────────────────────────────────────────
 
 _HANDLERS = {
     "entity.md":                        _sync_entity,
     "coverage.md":                      _sync_coverage,
     "action_queue.md":                  _sync_action_queue,
-    "vendor_profile.md":                _sync_vendor_profile,
-    "relationship_spend_profile.md":    _sync_rs_profile,
     "programme_plan.md":                _sync_programme_plan,
     "vendor_register.md":               _sync_vendor_register,
     "deduplication_report.md":          _sync_deduplication_report,
     "run_log.md":                       _sync_run_log,
     "triage_queue.md":                  _sync_triage_queue,
     "analysis_result.md":               _sync_analysis_result,
+    "action_plan.md":                   _sync_action_plan,
+    "task_list.md":                     _sync_task_list,
+    "execution_state.md":               _sync_execution_state,
 }
 
 
@@ -373,6 +429,9 @@ def sync_to_db(
     try:
         with factory() as session:
             if is_single_vendor_file:
+                if not (data.get("canonical_name") or data.get("intake") or data.get("vendor_name")):
+                    logger.debug("sync_to_db: no vendor fields in %s — skipping", path.name)
+                    return
                 _sync_single_vendor_file(session, data, vendor_id, programme_id)
             else:
                 handler(session, data, vendor_id)

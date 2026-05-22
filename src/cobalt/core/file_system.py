@@ -55,13 +55,35 @@ def coverage_path(programme_id: str, vendor_id: str) -> Path:
 
 
 def vendor_profile_path(programme_id: str, vendor_id: str) -> Path:
-    """Return the path to vendor_profile.md for a vendor (P2)."""
-    return vendor_path(programme_id, vendor_id) / "profile" / "vendor_profile.md"
+    """Return the consolidated profile path (P1/P2/P3 merged). P2 data is under enrichment: key."""
+    found = _find_vendor_file(programme_id, vendor_id)
+    return found if found is not None else vendor_path(programme_id, vendor_id) / f"{vendor_id}_profile.md"
 
 
 def rs_profile_path(programme_id: str, vendor_id: str) -> Path:
-    """Return the path to relationship_spend_profile.md for a vendor (P3)."""
-    return vendor_path(programme_id, vendor_id) / "profile" / "relationship_spend_profile.md"
+    """Return the consolidated profile path (P1/P2/P3 merged). P3 data is under relationship: key."""
+    found = _find_vendor_file(programme_id, vendor_id)
+    return found if found is not None else vendor_path(programme_id, vendor_id) / f"{vendor_id}_profile.md"
+
+
+def investigation_plan_path(programme_id: str, vendor_id: str) -> Path:
+    """Return the path to plans/investigation_plan.md for a vendor (P1)."""
+    return vendor_path(programme_id, vendor_id) / "plans" / "investigation_plan.md"
+
+
+def enrichment_plan_path(programme_id: str, vendor_id: str) -> Path:
+    """Return the path to plans/enrichment_plan.md for a vendor (P2)."""
+    return vendor_path(programme_id, vendor_id) / "plans" / "enrichment_plan.md"
+
+
+def rs_plan_path(programme_id: str, vendor_id: str) -> Path:
+    """Return the path to plans/rs_plan.md for a vendor (P3)."""
+    return vendor_path(programme_id, vendor_id) / "plans" / "rs_plan.md"
+
+
+def campaign_plan_path(programme_id: str, vendor_id: str) -> Path:
+    """Return the path to plans/campaign_plan.md for a vendor (VW Agent Level 3)."""
+    return vendor_path(programme_id, vendor_id) / "plans" / "campaign_plan.md"
 
 
 def ledger_path(programme_id: str, vendor_id: str) -> Path:
@@ -158,12 +180,30 @@ def _find_vendor_file(
     vendor_id: str,
     workspace_root: "Path | None" = None,
 ) -> "Path | None":
-    """Find the single *.md vendor file in the vendor workspace root directory.
+    """Find the consolidated *_profile.md vendor file in the vendor workspace root directory.
 
-    Returns the first .md file found directly in the vendor root, or None.
+    Search order:
+      1. {vendor_id}_profile.md  (new consolidated format)
+      2. {vendor_id}.md          (old single-file format, backward compat)
+      3. Any *_profile.md        (new format with slug-derived name)
+      4. Any *.md skipping known non-intake files (old format, slug-derived)
+    Returns None if the directory does not exist or no matching file found.
     """
     root = (Path(workspace_root) if workspace_root else WORKSPACE_ROOT) / programme_id / vendor_id
     if not root.is_dir():
         return None
-    md_files = [f for f in root.iterdir() if f.suffix == ".md" and f.is_file()]
+    _new = root / f"{vendor_id}_profile.md"
+    if _new.is_file():
+        return _new
+    _direct = root / f"{vendor_id}.md"
+    if _direct.is_file():
+        return _direct
+    profile_files = [
+        f for f in root.iterdir()
+        if f.suffix == ".md" and f.is_file() and f.name.endswith("_profile.md")
+    ]
+    if profile_files:
+        return profile_files[0]
+    _skip = {"action_plan.md", "analysis_result.md", "execution_state.md", "task_list.md"}
+    md_files = [f for f in root.iterdir() if f.suffix == ".md" and f.is_file() and f.name not in _skip]
     return md_files[0] if md_files else None

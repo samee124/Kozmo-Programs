@@ -23,12 +23,11 @@ import yaml
 
 from cobalt.core.atomic_write import append_md, atomic_write
 from cobalt.core.file_system import (
+    _find_vendor_file,
     entity_path,
     ledger_path,
     programme_run_path,
-    rs_profile_path,
     vendor_path,
-    vendor_profile_path,
 )
 from cobalt.core.pcs import compute_pcs
 from cobalt.core.staleness import is_stale
@@ -100,11 +99,12 @@ def _load_history_json(path: Path, cls):
 
 
 def _read_pcs(programme_id: str, vendor_id: str) -> float:
-    """Read current PCS from rs_profile frontmatter. Returns 0.0 if unavailable."""
-    rp = rs_profile_path(programme_id, vendor_id)
-    if rp.exists():
-        data = _read_md_frontmatter(rp)
-        val = data.get("pcs_total")
+    """Read current PCS from consolidated profile's relationship: key. Returns 0.0 if unavailable."""
+    vf = _find_vendor_file(programme_id, vendor_id)
+    if vf and vf.exists():
+        data = _read_md_frontmatter(vf)
+        rel = data.get("relationship") or {}
+        val = rel.get("pcs_total")
         if val is not None:
             return float(val)
     return 0.0
@@ -135,15 +135,16 @@ def _default_scoring_config() -> ScoringConfig:
 
 
 def _load_rs_profile_object(programme_id: str, vendor_id: str):
-    """Load relationship_spend_profile.md and return a RelationshipSpendProfile.
+    """Load relationship data from the consolidated profile and return a RelationshipSpendProfile.
 
-    Contract terms are not stored in the .md frontmatter — defaults to [].
-    Relationship classification fields are reconstructed from flat frontmatter keys.
+    Contract terms are not stored in the frontmatter — defaults to [].
+    Relationship classification fields are reconstructed from the relationship: key.
     """
     from cobalt.models.schemas.rs_schema import RelationshipSpendProfile
 
-    rp_path = rs_profile_path(programme_id, vendor_id)
-    data = _read_md_frontmatter(rp_path) if rp_path.exists() else {}
+    vf_path = _find_vendor_file(programme_id, vendor_id)
+    all_data = _read_md_frontmatter(vf_path) if vf_path and vf_path.exists() else {}
+    data = all_data.get("relationship") or {}
 
     full_data = {
         "vendor_id":       data.get("vendor_id") or vendor_id,
@@ -235,9 +236,21 @@ def _check_gates(
             analysed_at=_now_iso(),
         )
 
-    # Gate 2: RS profile must exist (P3 must be complete)
-    rp = rs_profile_path(programme_id, vendor_id)
-    if not rp.exists():
+    # Gate 2: consolidated profile must have relationship: data (P3 must be complete)
+    profile_path = _find_vendor_file(programme_id, vendor_id)
+    if profile_path is None or not profile_path.exists():
+        return ANRunResult(
+            vendor_id=vendor_id, programme_id=programme_id,
+            status=ANRunStatus.BLOCKED.value,
+            cri_score=None, health_band=None,
+            finding_count=0, nba_action=None,
+            pcs_before=None, pcs_after=None,
+            tools_run=[], skip_reason=None,
+            error="rs_profile_missing",
+            analysed_at=_now_iso(),
+        )
+    profile_data = _read_md_frontmatter(profile_path)
+    if not profile_data.get("relationship"):
         return ANRunResult(
             vendor_id=vendor_id, programme_id=programme_id,
             status=ANRunStatus.BLOCKED.value,
@@ -249,16 +262,12 @@ def _check_gates(
             analysed_at=_now_iso(),
         )
 
-    # Gate 3: vendor_profile.md missing → warn only, do not block.
-    # Single-file arch stores all P2 data in the root slug .md; suppress the
-    # warning when that file exists so normal runs don't produce false noise.
-    if not vendor_profile_path(programme_id, vendor_id).exists():
-        from cobalt.core.file_system import _find_vendor_file
-        if not _find_vendor_file(programme_id, vendor_id):
-            logger.warning(
-                "vendor_profile.md missing for %s/%s — continuing without P2 data",
-                programme_id, vendor_id,
-            )
+    # Gate 3: enrichment data missing → warn only, do not block.
+    if not profile_data.get("enrichment"):
+        logger.warning(
+            "enrichment data missing for %s/%s — continuing without P2 data",
+            programme_id, vendor_id,
+        )
 
     # Gate 4: Freshness check (skip unless force=True)
     if not force:

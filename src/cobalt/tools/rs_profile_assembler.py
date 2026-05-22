@@ -15,9 +15,10 @@ from pathlib import Path
 import yaml
 
 from cobalt.core import gap_analyzer
-from cobalt.core.atomic_write import append_md, atomic_write
+from cobalt.core.atomic_write import append_md
 from cobalt.core.exceptions import LedgerWriteError
 from cobalt.core.file_system import coverage_path, ledger_path, rs_profile_path
+from cobalt.workspace.builder import write_rs_profile
 from cobalt.models.schemas.rs_schema import (
     ContractTerms,
     DocumentIntelligenceResult,
@@ -193,7 +194,7 @@ def _build_data_sources_list(
 # ---------------------------------------------------------------------------
 
 def _read_prior_version(path: Path) -> tuple[int, str | None]:
-    """Return (version, created_at) from prior profile, or (0, None) if none."""
+    """Return (version, created_at) from prior consolidated profile's relationship: key, or (0, None)."""
     if not path.exists():
         return 0, None
     try:
@@ -202,7 +203,11 @@ def _read_prior_version(path: Path) -> tuple[int, str | None]:
         if len(parts) >= 3:
             import yaml as _yaml
             data = _yaml.safe_load(parts[1]) or {}
-            return data.get("profile_version", 0), data.get("created_at")
+            # In consolidated file the RS data lives under the relationship: key
+            rel = data.get("relationship") or {}
+            version = rel.get("profile_version") or data.get("profile_version", 0)
+            created = rel.get("created_at") or data.get("created_at")
+            return version, created
     except Exception:
         pass
     return 0, None
@@ -394,22 +399,30 @@ def assemble_rs_profile(
             data_sources=data_sources,
         )
 
-        # Step 8: Write markdown
-        md_content = _build_rs_profile_md(profile)
-        profile_path.parent.mkdir(parents=True, exist_ok=True)
-        atomic_write(
-            profile_path,
-            md_content,
-            vendor_id=vendor_id,
-            programme_id=programme_id,
-        )
+        # Step 8: Merge RS data into consolidated {slug}_profile.md
+        relationship_data = {
+            "vendor_id":          vendor_id,
+            "programme_id":       programme_id,
+            "profile_version":    profile_version,
+            "created_at":         created_at,
+            "last_updated":       now,
+            "pcs_contribution":   pcs_contribution,
+            "pcs_total":          pcs_total,
+            "dependency_tier":    classification.dependency_tier,
+            "relationship_type":  classification.relationship_type,
+            "spend_total_ttm_usd": summary.total_usd_ttm,
+            "contract_count":     contract_count,
+            "flags":              flags,
+            "profile_status":     profile_status,
+        }
+        written_path = write_rs_profile(relationship_data, programme_id, vendor_id)
 
         # Step 9: DB sync (explicit — not auto-triggered)
         try:
             from cobalt.db.sync_to_db import sync_to_db
-            sync_to_db(profile_path, vendor_id, programme_id)
+            sync_to_db(written_path, vendor_id, programme_id)
         except Exception as exc:
-            logger.warning("sync_to_db failed for %s: %s", profile_path, exc)
+            logger.warning("sync_to_db failed for %s: %s", written_path, exc)
 
         # Step 10: Ledger entry (LedgerWriteError propagates — HALT per Rule 4)
         ledger = ledger_path(programme_id, vendor_id)
@@ -432,7 +445,7 @@ def assemble_rs_profile(
 
     except Exception as exc:
         logger.exception("Profile assembly failed for %s: %s", vendor_id, exc)
-        _write_minimal_failed_profile(profile_path, vendor_id, str(exc), now)
+        _write_minimal_failed_profile(vendor_id, programme_id, str(exc), now)
         # Return a minimal failed profile
         return RelationshipSpendProfile(
             vendor_id=vendor_id,
@@ -454,24 +467,27 @@ def assemble_rs_profile(
 
 
 def _write_minimal_failed_profile(
-    path: Path,
     vendor_id: str,
+    programme_id: str,
     error: str,
     now: str,
 ) -> None:
-    """Write a minimal FAILED profile. Best-effort — swallows exceptions."""
+    """Write a minimal FAILED relationship section into the consolidated profile. Best-effort."""
     try:
-        fm_data = {
-            "vendor_id":      vendor_id,
-            "profile_version": 1,
-            "last_updated":   now,
-            "pcs_contribution": 0.0,
-            "flags":          ["PROFILE_ASSEMBLY_FAILED"],
-            "error":          error[:500],
-        }
-        fm_yaml = yaml.dump(fm_data, default_flow_style=False, allow_unicode=True)
-        content = f"---\n{fm_yaml}---\n\n# Profile Assembly Failed\n\nError: {error[:500]}\n"
-        path.parent.mkdir(parents=True, exist_ok=True)
-        atomic_write(path, content)
+        write_rs_profile(
+            {
+                "vendor_id":        vendor_id,
+                "programme_id":     programme_id,
+                "profile_version":  1,
+                "last_updated":     now,
+                "pcs_contribution": 0.0,
+                "pcs_total":        0.0,
+                "flags":            ["PROFILE_ASSEMBLY_FAILED"],
+                "profile_status":   "FAILED",
+                "error":            error[:500],
+            },
+            programme_id,
+            vendor_id,
+        )
     except Exception:
         pass
